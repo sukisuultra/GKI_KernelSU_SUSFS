@@ -72,6 +72,16 @@ on:
         required: false
         type: boolean
         default: true
+      custom_manager_expected_size2:
+        description: "Secondary trusted Manager certificate size (hex)"
+        required: false
+        type: string
+        default: ""
+      custom_manager_expected_hash2:
+        description: "Secondary trusted Manager certificate SHA256"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build-gki:
@@ -183,6 +193,31 @@ jobs:
       with:
         flavor: ${{ inputs.root_flavor }}
         commit: ${{ inputs.root_commit }}
+
+    - name: Configure secondary trusted Nova Utility Manager certificate
+      if: inputs.root_flavor == 'sukisu-ultra' && inputs.custom_manager_expected_size2 != '' && inputs.custom_manager_expected_hash2 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        SIZE='${{ inputs.custom_manager_expected_size2 }}'
+        HASH='${{ inputs.custom_manager_expected_hash2 }}'
+        [[ "$SIZE" =~ ^0x[0-9a-fA-F]+$ ]] || {
+          echo "::error::Invalid secondary Manager certificate size: $SIZE"
+          exit 1
+        }
+        [[ "$HASH" =~ ^[0-9a-f]{64}$ ]] || {
+          echo "::error::Invalid secondary Manager certificate SHA256: $HASH"
+          exit 1
+        }
+        {
+          echo "KSU_EXPECTED_SIZE2=$SIZE"
+          echo "KSU_EXPECTED_HASH2=$HASH"
+          echo "CUSTOM_MANAGER_CERT_SIZE=$SIZE"
+          echo "CUSTOM_MANAGER_CERT_SHA256=$HASH"
+        } >> "$GITHUB_ENV"
+        echo "PASS: secondary Manager certificate configured"
+        echo "size=$SIZE"
+        echo "sha256=$HASH"
 
     - name: Mark No Root build metadata
       if: inputs.root_flavor == 'none'
