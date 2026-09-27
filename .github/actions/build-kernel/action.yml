@@ -1,9 +1,13 @@
 name: 'Build Kernel'
-description: 'Builds kernel using legacy build.sh or Bazel (kleaf)'
+description: 'Builds kernel using legacy build.sh or Bazel (kleaf); SukiSU-Ultra builds are KPM-patched before packaging'
 inputs:
   version:
     description: 'Kernel config version (e.g., android14-6.1)'
     required: true
+  root_flavor:
+    description: 'Selected root implementation'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -11,11 +15,12 @@ runs:
   - name: Setup Kernel Configs
     if: false
     uses: ./.github/actions/set-kernel-config
-  
+
   - name: 'Build Kernel'
     shell: bash
     working-directory: ${{ github.workspace }}/kernel
     run: |
+      set -euo pipefail
       sed -i 's/check_defconfig//' ./common/build.config.gki
       if [ -f "build/build.sh" ]; then
         BUILD_GKI_ARTIFACTS="" \
@@ -40,21 +45,139 @@ runs:
           //common:kernel_aarch64/Image
       fi
 
+  - name: 'Apply pinned SukiSU KernelPatch for KPM'
+    if: inputs.root_flavor == 'sukisu-ultra'
+    shell: bash
+    working-directory: ${{ github.workspace }}/kernel
+    run: |
+      set -euo pipefail
+
+      KPM_VERSION="0.13.0"
+      KPM_EXPECTED_COMMIT="762e6fb446f58020691b83509873268f6af634f2"
+      KPM_PATCH_SHA256="ea4884140c0ee8835bc79b67e4c9b46094c6640d6407f0aab34d2df4e28e0450"
+      KPM_REPO="https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch.git"
+      KPM_URL="https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/${KPM_VERSION}/patch_linux"
+
+      if [ -f "bazel-bin/common/kernel_aarch64/Image" ]; then
+        IMAGE_PATH="$(realpath "bazel-bin/common/kernel_aarch64/Image")"
+      elif [ -f "/home/runner/out/dist/Image" ]; then
+        IMAGE_PATH="/home/runner/out/dist/Image"
+      else
+        echo "::error::Kernel Image not found; refusing to package an unpatched SukiSU kernel."
+        exit 1
+      fi
+
+      TAG_SHA="$(git ls-remote "$KPM_REPO" "refs/tags/${KPM_VERSION}^{}" | awk 'NR==1 {print $1}')"
+      if [ -z "$TAG_SHA" ]; then
+        TAG_SHA="$(git ls-remote "$KPM_REPO" "refs/tags/${KPM_VERSION}" | awk 'NR==1 {print $1}')"
+      fi
+      [ "$TAG_SHA" = "$KPM_EXPECTED_COMMIT" ] || {
+        echo "::error::KernelPatch tag moved or does not match the audited commit."
+        echo "Expected: $KPM_EXPECTED_COMMIT"
+        echo "Actual:   ${TAG_SHA:-missing}"
+        exit 1
+      }
+
+      PATCH_DIR="${RUNNER_TEMP}/sukisu-kernelpatch-${KPM_VERSION}"
+      PATCH_BIN="${PATCH_DIR}/patch_linux"
+      rm -rf "$PATCH_DIR"
+      mkdir -p "$PATCH_DIR"
+
+      curl --fail --location --show-error --silent \
+        --retry 5 --retry-delay 2 --retry-all-errors \
+        "$KPM_URL" -o "$PATCH_BIN"
+      chmod 0755 "$PATCH_BIN"
+
+      ACTUAL_PATCH_SHA256="$(sha256sum "$PATCH_BIN" | awk '{print $1}')"
+      [ "$ACTUAL_PATCH_SHA256" = "$KPM_PATCH_SHA256" ] || {
+        echo "::error::patch_linux SHA256 mismatch."
+        echo "Expected: $KPM_PATCH_SHA256"
+        echo "Actual:   $ACTUAL_PATCH_SHA256"
+        exit 1
+      }
+
+      BEFORE_SHA256="$(sha256sum "$IMAGE_PATH" | awk '{print $1}')"
+      BEFORE_SIZE="$(stat -c '%s' "$IMAGE_PATH")"
+      IMAGE_DIR="$(dirname "$IMAGE_PATH")"
+      rm -f "${IMAGE_DIR}/oImage"
+
+      (
+        cd "$IMAGE_DIR"
+        "$PATCH_BIN"
+      )
+
+      [ -s "${IMAGE_DIR}/oImage" ] || {
+        echo "::error::KernelPatch did not produce a non-empty oImage."
+        exit 1
+      }
+      ! cmp -s "$IMAGE_PATH" "${IMAGE_DIR}/oImage" || {
+        echo "::error::oImage is identical to the original Image."
+        exit 1
+      }
+
+      mv -f "${IMAGE_DIR}/oImage" "$IMAGE_PATH"
+      AFTER_SHA256="$(sha256sum "$IMAGE_PATH" | awk '{print $1}')"
+      AFTER_SIZE="$(stat -c '%s' "$IMAGE_PATH")"
+      [ "$BEFORE_SHA256" != "$AFTER_SHA256" ] || {
+        echo "::error::Image SHA256 did not change after KernelPatch."
+        exit 1
+      }
+
+      {
+        echo "KPM_PATCHED_IMAGE=$IMAGE_PATH"
+        echo "KPM_PATCHED_SHA256=$AFTER_SHA256"
+        echo "KPM_PATCH_VERSION=$KPM_VERSION"
+        echo "KPM_PATCH_COMMIT=$TAG_SHA"
+        echo "KPM_PATCH_BINARY_SHA256=$ACTUAL_PATCH_SHA256"
+        echo "KPM_IMAGE_SHA256_BEFORE=$BEFORE_SHA256"
+      } >> "$GITHUB_ENV"
+
+      {
+        echo "### SukiSU KPM KernelPatch"
+        echo "- Version: `$KPM_VERSION`"
+        echo "- Commit: `$TAG_SHA`"
+        echo "- patch_linux SHA256: `$ACTUAL_PATCH_SHA256`"
+        echo "- Image SHA256 before: `$BEFORE_SHA256`"
+        echo "- Image SHA256 after: `$AFTER_SHA256`"
+        echo "- Image size before: `$BEFORE_SIZE`"
+        echo "- Image size after: `$AFTER_SIZE`"
+      } >> "$GITHUB_STEP_SUMMARY"
+
   - name: 'Gather Build Artifacts'
     shell: bash
     working-directory: ${{ github.workspace }}/kernel
     run: |
       set -euo pipefail
-      if [ -f "bazel-bin/common/kernel_aarch64/Image" ]; then
-        echo "Found Image at bazel-bin/common/kernel_aarch64/Image"
-        cp "bazel-bin/common/kernel_aarch64/Image" "${{ github.workspace }}/AnyKernel3/Image"
-        exit 0
-        fi
-      if [ -f "/home/runner/out/dist/Image" ]; then
-        echo "Found Image at /home/runner/out/dist/Image"
-        cp "/home/runner/out/dist/Image" "${{ github.workspace }}/AnyKernel3/Image"
+      mkdir -p "${{ github.workspace }}/AnyKernel3"
+
+      if [ "${{ inputs.root_flavor }}" = "sukisu-ultra" ]; then
+        [ -n "${KPM_PATCHED_IMAGE:-}" ] && [ -s "$KPM_PATCHED_IMAGE" ] || {
+          echo "::error::Verified KPM-patched Image is missing."
+          exit 1
+        }
+        CURRENT_SHA256="$(sha256sum "$KPM_PATCHED_IMAGE" | awk '{print $1}')"
+        [ "$CURRENT_SHA256" = "${KPM_PATCHED_SHA256:-}" ] || {
+          echo "::error::Kernel Image changed after KPM validation."
+          exit 1
+        }
+        cp "$KPM_PATCHED_IMAGE" "${{ github.workspace }}/AnyKernel3/Image"
+        PACKAGED_SHA256="$(sha256sum "${{ github.workspace }}/AnyKernel3/Image" | awk '{print $1}')"
+        [ "$PACKAGED_SHA256" = "$KPM_PATCHED_SHA256" ] || {
+          echo "::error::AnyKernel3/Image does not match the verified KPM-patched Image."
+          exit 1
+        }
+        echo "KPM_PACKAGED_IMAGE_SHA256=$PACKAGED_SHA256" >> "$GITHUB_ENV"
+        echo "Verified KPM-patched Image packaged: $PACKAGED_SHA256"
         exit 0
       fi
 
+      if [ -f "bazel-bin/common/kernel_aarch64/Image" ]; then
+        cp "bazel-bin/common/kernel_aarch64/Image" "${{ github.workspace }}/AnyKernel3/Image"
+        exit 0
+      fi
+      if [ -f "/home/runner/out/dist/Image" ]; then
+        cp "/home/runner/out/dist/Image" "${{ github.workspace }}/AnyKernel3/Image"
+        exit 0
+      fi
+      echo "::error::Kernel Image not found."
       exit 1
-
