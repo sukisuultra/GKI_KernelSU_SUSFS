@@ -17,6 +17,8 @@ on:
       - '.github/actions/nomount-metamodule/**'
       - '.github/actions/root-setup/**'
       - '.github/scripts/backport-sukisu-builtin-uapi4.py'
+      - '.github/scripts/patch-nova-exclusive-manager.py'
+      - '.github/scripts/verify-nova-exclusive-image.py'
 
 concurrency:
   group: np03j-nova-utility-exclusive-final
@@ -248,39 +250,7 @@ jobs:
           [ "$CERT_SHA" = "$MANAGER_CERT_SHA256" ]
           [ "$CERT_SIZE" = "$MANAGER_CERT_SIZE_DEC" ]
 
-          python3 - "$IMAGE" <<'PY'
-                    import sys
-                    from pathlib import Path
-          
-                    image = Path(sys.argv[1]).read_bytes()
-                    required = {
-                        b"2b3d2c321a6b61090565e417cb020bfac1f4330d104481e80ed65aff632d94d4":
-                            "Nova Utility certificate hash",
-                        b"app.nova.utility": "exclusive package lock",
-                        b"NOVA_UTILITY_EXCLUSIVE_MANAGER_V1_CERTMAX_1280": "exclusive policy marker",
-                    }
-                    for needle, name in required.items():
-                        count = image.count(needle)
-                        if count < 1:
-                            raise SystemExit(f"missing {name} in final Image")
-          
-                    forbidden = {
-                        b"947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef":
-                            "official SukiSU Manager certificate",
-                        b"f415f4ed9435427e1fdf7f1fccd4dbc07b3d6b8751e4dbcec6f19671f427870b":
-                            "RKSU Manager certificate",
-                        b"c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6":
-                            "KSU Manager certificate",
-                        b"79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7":
-                            "KSUN Manager certificate",
-                    }
-                    for needle, name in forbidden.items():
-                        if needle in image:
-                            raise SystemExit(f"forbidden legacy trust remains in final Image: {name}")
-          
-                    print("PASS: packaged Image contains exclusive Nova Utility runtime policy")
-                    print("PASS: legacy/official Manager trust hashes absent")
-          PY
+          python3 "${{ github.workspace }}/.github/scripts/verify-nova-exclusive-image.py" "$IMAGE"
 
           PACKAGED_SHA="$(awk -F'|' '/\*\*Packaged Image SHA256\*\*/ {gsub(/[[:space:]]/,"",$3); print $3; exit}' "$SUMMARY")"
           BEFORE_SHA="$(awk -F'|' '/\*\*Image SHA256 before KPM\*\*/ {gsub(/[[:space:]]/,"",$3); print $3; exit}' "$SUMMARY")"
