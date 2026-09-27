@@ -12,33 +12,11 @@ on:
       - '.github/scripts/backport-sukisu-builtin-uapi4.py'
       - '.github/actions/root-setup/action.yml'
       - '.github/workflows/main.yml'
+      - '.github/workflows/build.yml'
       - '.github/workflows/np03j-uapi4-audit.yml'
   workflow_dispatch:
 
 jobs:
-  resolve:
-    runs-on: ubuntu-latest
-    outputs:
-      kernel_patches_commit: ${{ steps.refs.outputs.kernel_patches_commit }}
-      anykernel3_commit: ${{ steps.refs.outputs.anykernel3_commit }}
-    steps:
-      - name: Resolve build helper refs
-        id: refs
-        shell: bash
-        run: |
-          set -euo pipefail
-          resolve() {
-            git ls-remote "$1" "$2" | awk '{print $1; exit}'
-          }
-          KP="$(resolve https://github.com/WildKernels/kernel_patches.git refs/heads/main)"
-          AK="$(resolve https://github.com/WildKernels/AnyKernel3.git refs/heads/gki-2.0)"
-          [[ "$KP" =~ ^[0-9a-f]{40}$ ]] || { echo "bad kernel_patches SHA" >&2; exit 1; }
-          [[ "$AK" =~ ^[0-9a-f]{40}$ ]] || { echo "bad AnyKernel3 SHA" >&2; exit 1; }
-          echo "kernel_patches_commit=$KP" >> "$GITHUB_OUTPUT"
-          echo "anykernel3_commit=$AK" >> "$GITHUB_OUTPUT"
-          echo "kernel_patches=$KP"
-          echo "anykernel3=$AK"
-
   mirror-manager-40939:
     runs-on: ubuntu-latest
     env:
@@ -148,7 +126,6 @@ jobs:
           echo "PASS sha256=$ACTUAL"
 
   build-uapi4:
-    needs: resolve
     uses: ./.github/workflows/prepare.yml
     with:
       config_file: .github/config/android14-6.1.json
@@ -157,8 +134,8 @@ jobs:
       root_flavor: sukisu-ultra
       root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
       nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
-      kernel_patches_commit: ${{ needs.resolve.outputs.kernel_patches_commit }}
-      anykernel3_commit: ${{ needs.resolve.outputs.anykernel3_commit }}
+      kernel_patches_commit: 41ae18b35d20e0c6ac04116785a4a1089528ae94
+      anykernel3_commit: e1e9dce98430c5c6f231f7094a8c7f4ecaf50948
       droidspaces_commit: ""
       brand_name: Wild
       bypass: false
