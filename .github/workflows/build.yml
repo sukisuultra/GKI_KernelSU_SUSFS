@@ -711,6 +711,14 @@ jobs:
           echo "| **Root Commit** | ${ROOT_SHA} |"
           echo "| **SUSFS Version** | ${SUSFS_VER} |"
           echo "| **SUSFS Commit** | ${SUSFS_SHA} |"
+          if [ "${ROOT_IMPL}" = "sukisu-ultra" ]; then
+            echo "| **CONFIG_KPM** | y |"
+            echo "| **KernelPatch Version** | ${KPM_PATCH_VERSION:-N/A} |"
+            echo "| **KernelPatch Commit** | ${KPM_PATCH_COMMIT:-N/A} |"
+            echo "| **patch_linux SHA256** | ${KPM_PATCH_BINARY_SHA256:-N/A} |"
+            echo "| **Image SHA256 before KPM** | ${KPM_IMAGE_SHA256_BEFORE:-N/A} |"
+            echo "| **Packaged Image SHA256** | ${KPM_PACKAGED_IMAGE_SHA256:-N/A} |"
+          fi
           echo "| **NoMount Commit** | ${NOMOUNT_SHA} |"
           echo "| **Feature Set** | ${{ inputs.feature_set }} |"
           echo "| **Variant** | ${{ inputs.variant }} |"
@@ -816,6 +824,11 @@ jobs:
           --arg root_version "${ROOT_VERSION:-${KSU_GIT_TAG:-N/A}}" \
           --arg root_commit "${ROOT_COMMIT:-${KSU_COMMIT:-N/A}}" \
           --arg susfs_commit "${SUSFS_COMMIT:-N/A}" \
+          --arg kpm_patch_version "${KPM_PATCH_VERSION:-N/A}" \
+          --arg kpm_patch_commit "${KPM_PATCH_COMMIT:-N/A}" \
+          --arg kpm_patch_binary_sha256 "${KPM_PATCH_BINARY_SHA256:-N/A}" \
+          --arg kpm_image_sha256_before "${KPM_IMAGE_SHA256_BEFORE:-N/A}" \
+          --arg kpm_packaged_image_sha256 "${KPM_PACKAGED_IMAGE_SHA256:-N/A}" \
           --arg nomount_commit "${NOMOUNT_COMMIT:-N/A}" \
           --arg android_branch "${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}" \
           --arg kmi "${{ inputs.android_version }}-${{ inputs.kernel_version }}" \
@@ -840,6 +853,13 @@ jobs:
               commit: $root_commit
             },
             susfs_revision: $susfs_commit,
+            kpm: {
+              patch_version: $kpm_patch_version,
+              patch_commit: $kpm_patch_commit,
+              patch_linux_sha256: $kpm_patch_binary_sha256,
+              image_sha256_before: $kpm_image_sha256_before,
+              packaged_image_sha256: $kpm_packaged_image_sha256
+            },
             nomount_commit: $nomount_commit,
             android_branch: $android_branch,
             kmi: $kmi,
@@ -872,7 +892,19 @@ jobs:
           .catalog.availability == "eligible-with-provenance-and-checksums" and
           .catalog.device_compatibility == "not-validated" and
           .catalog.flashability == "not-guaranteed" and
-          .catalog.boot == "not-guaranteed"
+          .catalog.boot == "not-guaranteed" and
+          (
+            if .root.implementation == "sukisu-ultra" then
+              .kpm.patch_version == "0.13.0" and
+              (.kpm.patch_commit | test("^[0-9a-f]{40}$")) and
+              (.kpm.patch_linux_sha256 | test("^[0-9a-f]{64}$")) and
+              (.kpm.image_sha256_before | test("^[0-9a-f]{64}$")) and
+              (.kpm.packaged_image_sha256 | test("^[0-9a-f]{64}$")) and
+              (.kpm.image_sha256_before != .kpm.packaged_image_sha256)
+            else
+              true
+            end
+          )
         ' "$metadata_file" > /dev/null
         if [ "$NOMOUNT_ENABLED" = "true" ]; then
           jq -e '
