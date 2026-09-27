@@ -2,7 +2,7 @@ name: NP03J SukiSU UAPI4 Audit
 
 permissions:
   contents: write
-  actions: read
+  actions: write
 
 on:
   push:
