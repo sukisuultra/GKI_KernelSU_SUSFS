@@ -366,6 +366,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Production SukiSU Manager pin for verified mode.
+          PIN_SUKISU_MANAGER_TAG="v4.2.0"
+          PIN_SUKISU_MANAGER_APK="SukiSU_v4.2.0_40900-release.apk"
+          PIN_SUKISU_MANAGER_SHA256="4ca9810e6355fbff0bbe4bf5ce159808e64a40d85987a11894030cd990a6bdf3"
+
           # Credit: authenticated gh-API manager lookup adapted from EmberHeart-Kernels
           # commit ae9a341 (nullptr-t-oss/composite_actions fetch_ksu_manager).
           # Each selected root must ship ALL manager APK builds. KernelSU-Next publishes
@@ -438,7 +443,7 @@ jobs:
                 ;;
               sukisu-ultra)
                 owner="SukiSU-Ultra"; repo="SukiSU-Ultra"
-                if [ "${COMMIT_MODE:-${{ inputs.commit_mode || 'verified' }}" = "verified" ]; then
+                if [ "${{ inputs.commit_mode || 'verified' }}" = "verified" ]; then
                   manager_tag="${PIN_SUKISU_MANAGER_TAG}"
                   manager_apk="${PIN_SUKISU_MANAGER_APK}"
                   manager_sha="${PIN_SUKISU_MANAGER_SHA256}"
