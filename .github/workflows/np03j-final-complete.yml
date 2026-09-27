@@ -4,6 +4,10 @@ permissions:
   contents: write
   actions: write
 
+concurrency:
+  group: np03j-final-complete
+  cancel-in-progress: true
+
 on:
   push:
     branches:
