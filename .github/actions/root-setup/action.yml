@@ -93,6 +93,14 @@ runs:
           echo "Selected root checkout does not contain a kernel integration." >&2
           exit 1
         fi
+        if [ "$flavor" = "sukisu-ultra" ]; then
+          python3 "${{ github.workspace }}/.github/scripts/backport-sukisu-builtin-uapi4.py" "$PWD/$directory"
+          echo "SUKISU_UAPI_BACKPORT=4" >> "$GITHUB_ENV"
+          echo "SUKISU_MANAGER_GENERATION=40939" >> "$GITHUB_ENV"
+          echo "SUKISU_UAPI3_UPSTREAM=86e9b3bf00724b0f649709b8317f0475caf9e8ae" >> "$GITHUB_ENV"
+          echo "SUKISU_UAPI4_UPSTREAM=dda78702bef1841e70d5b26150b12c03b782e175" >> "$GITHUB_ENV"
+        fi
+
         root_version="$(git -C "$directory" describe --tags --always --dirty)"
 
         relative_kernel="$(realpath --relative-to="$drivers_dir" "$PWD/$directory/kernel")"

@@ -298,6 +298,32 @@ jobs:
           exit 1
         }
 
+        # Manager 40939 reports UAPI 4. Refuse a cosmetic version-only match.
+        grep -q 'KERNEL_SU_UAPI_VERSION, 4' "$SUKI_DIR/kernel/include/uapi/supercall.h" || {
+          echo "::error::SukiSU kernel UAPI is not 4"
+          exit 1
+        }
+        grep -q 'KSU_GET_INFO_FLAG_BUNDLED' "$SUKI_DIR/kernel/include/uapi/supercall.h" || {
+          echo "::error::UAPI4 bundled flag definition missing"
+          exit 1
+        }
+        grep -q 'KSU_DRIVER_PERMISSION_SU_SESSION' "$SUKI_DIR/kernel/supercall/supercall.c" || {
+          echo "::error::UAPI3 scoped su-session implementation missing"
+          exit 1
+        }
+        grep -q 'ksu_install_su_fd' "$SUKI_DIR/kernel/feature/sucompat.c" || {
+          echo "::error::UAPI3 sucompat integration missing"
+          exit 1
+        }
+        grep -q 'override_creds(ksu_cred)' "$SUKI_DIR/kernel/infra/file_wrapper.c" || {
+          echo "::error::UAPI3 file-wrapper credential fix missing"
+          exit 1
+        }
+        grep -Eq '^KSU_VERSION[[:space:]]*:=[[:space:]]*40939$' "$SUKI_DIR/kernel/Makefile" || {
+          echo "::error::SukiSU kernel generation is not frozen to official Manager 40939"
+          exit 1
+        }
+
         test -f "${{ github.workspace }}/kernel/common/fs/susfs.c" || {
           echo "::error::SUSFS fs/susfs.c was not integrated"
           exit 1
@@ -320,7 +346,9 @@ jobs:
           echo "SUSFS_VERIFIED_VERSION=$SUSFS_VERSION"
         } >> "$GITHUB_ENV"
 
-        echo "PASS: SukiSU SHA=$ACTUAL_SUKI"
+        echo "PASS: SukiSU SHA=$ACTUAL_SUKI + audited UAPI4 backport"
+        echo "PASS: kernel generation=40939 UAPI=4"
+        echo "PASS: UAPI3 scoped su-session semantics present"
         echo "PASS: SUSFS SHA=$ACTUAL_SUSFS version=$SUSFS_VERSION"
         echo "PASS: CONFIG_KSU=y CONFIG_KPM=y CONFIG_KSU_SUSFS=y"
         echo "PASS: no patch rejects"
