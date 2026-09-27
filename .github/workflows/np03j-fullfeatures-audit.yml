@@ -1,0 +1,37 @@
+name: NP03J Full Features Audit
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  push:
+    branches:
+      - np03j-fullfeatures-audit
+    paths:
+      - '.github/actions/bbg/action.yml'
+      - '.github/workflows/np03j-fullfeatures-audit.yml'
+      - '.github/actions/**'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/prepare.yml'
+  workflow_dispatch:
+
+jobs:
+  build-fullfeatures:
+    uses: ./.github/workflows/prepare.yml
+    with:
+      config_file: .github/config/android14-6.1.json
+      feature_set: SUSFS+NoMount+BBG+NET+DS+NTSync+Ptrace+Unicode+BPF
+      susfs_commit: 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70
+      root_flavor: sukisu-ultra
+      root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
+      nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
+      kernel_patches_commit: 41ae18b35d20e0c6ac04116785a4a1089528ae94
+      anykernel3_commit: e1e9dce98430c5c6f231f7094a8c7f4ecaf50948
+      droidspaces_commit: cff50fa04d50472b607ba6822e8bf482b19cd427
+      brand_name: Wild
+      bypass: false
+      use_cache: false
+      os_patch_level: lts
+      variant: SukiSU-FullFeatures-Audit
+    secrets: inherit
