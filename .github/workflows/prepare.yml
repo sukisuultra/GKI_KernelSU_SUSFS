@@ -76,6 +76,16 @@ on:
         required: false
         type: string
         default: ""
+      custom_manager_expected_size2:
+        description: "Secondary trusted Manager certificate size (hex)"
+        required: false
+        type: string
+        default: ""
+      custom_manager_expected_hash2:
+        description: "Secondary trusted Manager certificate SHA256"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   generate-matrix:
@@ -183,4 +193,6 @@ jobs:
       brand_name: ${{ inputs.brand_name }}
       bypass: ${{ inputs.bypass }}
       use_cache: ${{ inputs.use_cache }}
+      custom_manager_expected_size2: ${{ inputs.custom_manager_expected_size2 }}
+      custom_manager_expected_hash2: ${{ inputs.custom_manager_expected_hash2 }}
     secrets: inherit
