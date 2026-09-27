@@ -20,10 +20,10 @@ jobs:
   build-custom-manager:
     runs-on: ubuntu-latest
     outputs:
-      cert_size: \${{ steps.manager.outputs.cert_size }}
-      cert_hash: \${{ steps.manager.outputs.cert_hash }}
-      apk_sha256: \${{ steps.manager.outputs.apk_sha256 }}
-      apk_name: \${{ steps.manager.outputs.apk_name }}
+      cert_size: ${{ steps.manager.outputs.cert_size }}
+      cert_hash: ${{ steps.manager.outputs.cert_hash }}
+      apk_sha256: ${{ steps.manager.outputs.apk_sha256 }}
+      apk_name: ${{ steps.manager.outputs.apk_name }}
     steps:
       - uses: actions/checkout@v7
 
@@ -47,7 +47,7 @@ jobs:
         id: manager
         shell: bash
         env:
-          ANDROID_NDK_HOME: \${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: bash .github/scripts/build-nova-utility-manager.sh
 
       - name: Upload Nova Utility Manager
@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MODULE_DIR="\${{ steps.buildmod.outputs.module_dir }}"
+          MODULE_DIR="${{ steps.buildmod.outputs.module_dir }}"
           EXPECTED="d0f57d5c37ff02aae2299daded57919153240cb3"
           ACTUAL="$(tr -d '\r\n' < "$MODULE_DIR/NOMOUNT_SOURCE_COMMIT")"
           [ "$ACTUAL" = "$EXPECTED" ]
@@ -88,7 +88,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: NoMount-Metamodule
-          path: \${{ steps.buildmod.outputs.module_dir }}
+          path: ${{ steps.buildmod.outputs.module_dir }}
           if-no-files-found: error
           compression-level: 0
 
@@ -112,8 +112,8 @@ jobs:
       use_cache: false
       os_patch_level: lts
       variant: NP03J-Final-Full
-      custom_manager_cert_size: \${{ needs.build-custom-manager.outputs.cert_size }}
-      custom_manager_cert_hash: \${{ needs.build-custom-manager.outputs.cert_hash }}
+      custom_manager_cert_size: ${{ needs.build-custom-manager.outputs.cert_size }}
+      custom_manager_cert_hash: ${{ needs.build-custom-manager.outputs.cert_hash }}
     secrets: inherit
 
   final-bundle:
@@ -123,11 +123,11 @@ jobs:
       - build-fullfeatures
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: \${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: np03j-final-40939-uapi4-fullfeatures
-      MANAGER_CERT_SIZE: \${{ needs.build-custom-manager.outputs.cert_size }}
-      MANAGER_CERT_HASH: \${{ needs.build-custom-manager.outputs.cert_hash }}
-      MANAGER_APK_SHA: \${{ needs.build-custom-manager.outputs.apk_sha256 }}
+      MANAGER_CERT_SIZE: ${{ needs.build-custom-manager.outputs.cert_size }}
+      MANAGER_CERT_HASH: ${{ needs.build-custom-manager.outputs.cert_hash }}
+      MANAGER_APK_SHA: ${{ needs.build-custom-manager.outputs.apk_sha256 }}
     steps:
       - uses: actions/checkout@v7
 
