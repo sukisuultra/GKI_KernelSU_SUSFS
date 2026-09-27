@@ -1,8 +1,8 @@
 name: NP03J FINAL Verified Nova Utility Pair
 
 permissions:
-  contents: read
-  actions: read
+  contents: write
+  actions: write
 
 on:
   workflow_dispatch:
