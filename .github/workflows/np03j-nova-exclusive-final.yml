@@ -1,0 +1,336 @@
+name: NP03J NOVA UTILITY EXCLUSIVE FINAL
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - np03j-nova-exclusive-final
+    paths:
+      - '.github/workflows/np03j-nova-exclusive-final.yml'
+      - '.github/workflows/np03j-nova-exclusive-prepare.yml'
+      - '.github/workflows/np03j-nova-exclusive-build.yml'
+      - '.github/actions/build-kernel-nova-exclusive/action.yml'
+      - '.github/actions/nomount-metamodule/**'
+      - '.github/actions/root-setup/**'
+      - '.github/scripts/backport-sukisu-builtin-uapi4.py'
+
+concurrency:
+  group: np03j-nova-utility-exclusive-final
+  cancel-in-progress: true
+
+env:
+  MANAGER_SOURCE_RUN: "36338545396"
+  MANAGER_SOURCE_ARTIFACT: Nova-Utility-Manager-40939-CrashFix
+  MANAGER_PACKAGE: app.nova.utility
+  MANAGER_VERSION_CODE: "40939"
+  MANAGER_UAPI: "4"
+  MANAGER_APK_SHA256: 657c228e406a89f7e954063313c01fd3ae542f9960767d0f5436212f7c139c59
+  MANAGER_CERT_SHA256: 2b3d2c321a6b61090565e417cb020bfac1f4330d104481e80ed65aff632d94d4
+  MANAGER_CERT_SIZE_HEX: "0x424"
+  MANAGER_CERT_SIZE_DEC: "1060"
+  OLD_KERNEL_CERT_MAX: "1024"
+  NEW_KERNEL_CERT_MAX: "1280"
+  OFFICIAL_SUKISU_CERT_SHA256: 947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef
+  POLICY_MARKER: NOVA_UTILITY_EXCLUSIVE_MANAGER_V1_CERTMAX_1280
+  NOMOUNT_COMMIT: d0f57d5c37ff02aae2299daded57919153240cb3
+
+jobs:
+  manager-preflight:
+    name: Verify exact tested Nova Utility Manager and prove prior runtime blocker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      expected_size2: ${{ steps.verify.outputs.expected_size2 }}
+      expected_hash2: ${{ steps.verify.outputs.expected_hash2 }}
+    steps:
+      - name: Download exact user-tested CrashFix Manager
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.MANAGER_SOURCE_ARTIFACT }}
+          path: manager
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.MANAGER_SOURCE_RUN }}
+
+      - name: Verify immutable Manager identity and prior 1024-byte incompatibility
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="manager/Nova-Utility-v4.2.0-40939-spoofed.apk"
+          CERT="manager/Nova-Utility-40939-cert.der"
+          INFO="manager/Nova-Utility-ManagerInfo.txt"
+          SIGN="manager/apksigner.txt"
+
+          test -f "$APK"
+          test -f "$CERT"
+          test -f "$INFO"
+          test -f "$SIGN"
+
+          APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          CERT_SHA="$(sha256sum "$CERT" | awk '{print $1}')"
+          CERT_SIZE="$(stat -c%s "$CERT")"
+          CERT_HEX="$(printf '0x%x' "$CERT_SIZE")"
+
+          [ "$APK_SHA" = "$MANAGER_APK_SHA256" ]
+          [ "$CERT_SHA" = "$MANAGER_CERT_SHA256" ]
+          [ "$CERT_SIZE" = "$MANAGER_CERT_SIZE_DEC" ]
+          [ "$CERT_HEX" = "$MANAGER_CERT_SIZE_HEX" ]
+
+          # This is the root cause of every previous runtime "Not installed":
+          # 1060-byte cert > audited kernel parser ceiling 1024.
+          [ "$CERT_SIZE" -gt "$OLD_KERNEL_CERT_MAX" ] || {
+            echo "::error::Expected tested Manager certificate to exceed old 1024-byte parser ceiling"
+            exit 1
+          }
+          [ "$CERT_SIZE" -le "$NEW_KERNEL_CERT_MAX" ] || {
+            echo "::error::Manager certificate exceeds new exclusive parser ceiling"
+            exit 1
+          }
+
+          grep -Fxq 'app_name=Nova Utility' "$INFO"
+          grep -Fxq 'package=app.nova.utility' "$INFO"
+          grep -Fxq 'version_name=v4.2.0' "$INFO"
+          grep -Fxq 'version_code=40939' "$INFO"
+          grep -Fxq 'uapi=4' "$INFO"
+          grep -Fxq 'ksud_package_binding=app.nova.utility' "$INFO"
+          grep -Fxq 'deterministic_spoof=true' "$INFO"
+
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' "$SIGN"
+          grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): false' "$SIGN"
+
+          rm -rf /tmp/nova-manager
+          mkdir -p /tmp/nova-manager
+          unzip -q "$APK" 'lib/arm64-v8a/libksud.so' -d /tmp/nova-manager
+          KSUD="/tmp/nova-manager/lib/arm64-v8a/libksud.so"
+          grep -aFq 'app.nova.utility' "$KSUD"
+          grep -aFq 'app.nova.utility.ui.MainActivity' "$KSUD"
+          if grep -aFq 'com.sukisu.ultra.ui.MainActivity' "$KSUD"; then
+            echo "::error::Old Manager activity binding remains in ksud"
+            exit 1
+          fi
+
+          echo "expected_size2=$MANAGER_CERT_SIZE_HEX" >> "$GITHUB_OUTPUT"
+          echo "expected_hash2=$MANAGER_CERT_SHA256" >> "$GITHUB_OUTPUT"
+
+          echo "PASS: exact tested Manager APK is immutable"
+          echo "PASS: cert_size=$CERT_SIZE ($CERT_HEX)"
+          echo "PASS: proven old runtime blocker: cert_size $CERT_SIZE > old CERT_MAX_LENGTH $OLD_KERNEL_CERT_MAX"
+          echo "PASS: new parser ceiling $NEW_KERNEL_CERT_MAX accepts cert_size $CERT_SIZE"
+          echo "PASS: package=$MANAGER_PACKAGE cert_sha256=$MANAGER_CERT_SHA256"
+
+      - name: Upload exact paired Manager
+        uses: actions/upload-artifact@v7
+        with:
+          name: Nova-Utility-Manager-40939-EXCLUSIVE-FINAL
+          path: manager/**
+          if-no-files-found: error
+          compression-level: 9
+
+  nomount:
+    name: Build exact pinned NoMount metamodule
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build exact NoMount
+        id: buildmod
+        uses: ./.github/actions/nomount-metamodule
+        with:
+          commit: d0f57d5c37ff02aae2299daded57919153240cb3
+
+      - name: Verify exact NoMount provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODULE_DIR="${{ steps.buildmod.outputs.module_dir }}"
+          ACTUAL="$(tr -d '\r\n' < "$MODULE_DIR/NOMOUNT_SOURCE_COMMIT")"
+          [ "$ACTUAL" = "$NOMOUNT_COMMIT" ]
+          test -x "$MODULE_DIR/bin/nm-arm64"
+          test -x "$MODULE_DIR/bin/nm-arm"
+          echo "PASS NoMount=$ACTUAL"
+
+      - name: Upload NoMount with build-engine contract name
+        uses: actions/upload-artifact@v7
+        with:
+          name: NoMount-Metamodule
+          path: ${{ steps.buildmod.outputs.module_dir }}
+          if-no-files-found: error
+          compression-level: 0
+
+  kernel:
+    name: Build fresh exclusive-manager NP03J kernel
+    needs:
+      - manager-preflight
+      - nomount
+    uses: ./.github/workflows/np03j-nova-exclusive-prepare.yml
+    with:
+      config_file: .github/config/android14-6.1.json
+      feature_set: SUSFS+NoMount+BBG+NET+DS+NTSync+Ptrace+Unicode+BPF
+      susfs_commit: 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70
+      root_flavor: sukisu-ultra
+      root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
+      nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
+      kernel_patches_commit: 41ae18b35d20e0c6ac04116785a4a1089528ae94
+      anykernel3_commit: e1e9dce98430c5c6f231f7094a8c7f4ecaf50948
+      droidspaces_commit: cff50fa04d50472b607ba6822e8bf482b19cd427
+      brand_name: Wild
+      bypass: false
+      use_cache: false
+      os_patch_level: lts
+      variant: SukiSU-NovaUtility-EXCLUSIVE-FINAL
+      custom_manager_expected_size2: ${{ needs.manager-preflight.outputs.expected_size2 }}
+      custom_manager_expected_hash2: ${{ needs.manager-preflight.outputs.expected_hash2 }}
+    secrets: inherit
+
+  final-forensic:
+    name: FINAL fail-closed runtime-policy forensic gate
+    needs:
+      - manager-preflight
+      - nomount
+      - kernel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download final AnyKernel3
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*SukiSU-NovaUtility-EXCLUSIVE-FINAL-AnyKernel3'
+          path: final-kernel
+          merge-multiple: true
+
+      - name: Download final BuildInfo
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*SukiSU-NovaUtility-EXCLUSIVE-FINAL-BuildInfo'
+          path: final-buildinfo
+          merge-multiple: true
+
+      - name: Download exact Manager from this run
+        uses: actions/download-artifact@v8
+        with:
+          name: Nova-Utility-Manager-40939-EXCLUSIVE-FINAL
+          path: final-manager
+
+      - name: Download exact NoMount from this run
+        uses: actions/download-artifact@v8
+        with:
+          name: NoMount-Metamodule
+          path: final-nomount
+
+      - name: Prove exclusive runtime Manager policy in the actual packaged Image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="$(find final-kernel -type f -name Image -print -quit)"
+          SUMMARY="$(find final-buildinfo -type f -name '*.md' -print -quit)"
+          APK="final-manager/Nova-Utility-v4.2.0-40939-spoofed.apk"
+          CERT="final-manager/Nova-Utility-40939-cert.der"
+          NOMOUNT_FILE="$(find final-nomount -type f -name NOMOUNT_SOURCE_COMMIT -print -quit)"
+
+          test -n "$IMAGE" && test -s "$IMAGE"
+          test -n "$SUMMARY" && test -s "$SUMMARY"
+          test -f "$APK"
+          test -f "$CERT"
+          test -n "$NOMOUNT_FILE"
+
+          APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          CERT_SHA="$(sha256sum "$CERT" | awk '{print $1}')"
+          CERT_SIZE="$(stat -c%s "$CERT")"
+          IMAGE_SHA="$(sha256sum "$IMAGE" | awk '{print $1}')"
+
+          [ "$APK_SHA" = "$MANAGER_APK_SHA256" ]
+          [ "$CERT_SHA" = "$MANAGER_CERT_SHA256" ]
+          [ "$CERT_SIZE" = "$MANAGER_CERT_SIZE_DEC" ]
+
+          python3 - "$IMAGE" <<'PY'
+          import sys
+          from pathlib import Path
+
+          image = Path(sys.argv[1]).read_bytes()
+          required = {
+              b"2b3d2c321a6b61090565e417cb020bfac1f4330d104481e80ed65aff632d94d4":
+                  "Nova Utility certificate hash",
+              b"app.nova.utility": "exclusive package lock",
+              b"NOVA_UTILITY_EXCLUSIVE_MANAGER_V1_CERTMAX_1280": "exclusive policy marker",
+          }
+          for needle, name in required.items():
+              count = image.count(needle)
+              if count < 1:
+                  raise SystemExit(f"missing {name} in final Image")
+
+          forbidden = {
+              b"947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef":
+                  "official SukiSU Manager certificate",
+              b"f415f4ed9435427e1fdf7f1fccd4dbc07b3d6b8751e4dbcec6f19671f427870b":
+                  "RKSU Manager certificate",
+              b"c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6":
+                  "KSU Manager certificate",
+              b"79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7":
+                  "KSUN Manager certificate",
+          }
+          for needle, name in forbidden.items():
+              if needle in image:
+                  raise SystemExit(f"forbidden legacy trust remains in final Image: {name}")
+
+          print("PASS: packaged Image contains exclusive Nova Utility runtime policy")
+          print("PASS: legacy/official Manager trust hashes absent")
+          PY
+
+          PACKAGED_SHA="$(awk -F'|' '/\*\*Packaged Image SHA256\*\*/ {gsub(/[[:space:]]/,"",$3); print $3; exit}' "$SUMMARY")"
+          BEFORE_SHA="$(awk -F'|' '/\*\*Image SHA256 before KPM\*\*/ {gsub(/[[:space:]]/,"",$3); print $3; exit}' "$SUMMARY")"
+
+          [[ "$PACKAGED_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BEFORE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [ "$IMAGE_SHA" = "$PACKAGED_SHA" ]
+          [ "$BEFORE_SHA" != "$PACKAGED_SHA" ]
+
+          grep -Fq '| **CONFIG_KPM** | y |' "$SUMMARY"
+          grep -Fq '| **KernelPatch Version** | 0.13.0 |' "$SUMMARY"
+          grep -Fq '| **KernelPatch Commit** | 762e6fb446f58020691b83509873268f6af634f2 |' "$SUMMARY"
+          grep -Fq '| **SUSFS Version** | v2.3.0 |' "$SUMMARY"
+          grep -Fq '| **SUSFS Commit** | 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70 |' "$SUMMARY"
+          grep -Fq '| **NoMount Commit** | d0f57d5c37ff02aae2299daded57919153240cb3 |' "$SUMMARY"
+
+          NOMOUNT_ACTUAL="$(tr -d '\r\n' < "$NOMOUNT_FILE")"
+          [ "$NOMOUNT_ACTUAL" = "$NOMOUNT_COMMIT" ]
+
+          cat > NP03J_NOVA_EXCLUSIVE_FINAL_REPORT.txt <<EOF
+          status=PASS
+          root_cause_previous_builds=manager_certificate_1060_bytes_exceeded_kernel_CERT_MAX_LENGTH_1024
+          second_root_cause_risk=multiple_trusted_manager_packages_allowed_throne_tracker_to_crown_old_manager
+          manager_package=app.nova.utility
+          manager_version_code=40939
+          manager_uapi=4
+          manager_apk_sha256=$APK_SHA
+          manager_certificate_size=$CERT_SIZE
+          manager_certificate_sha256=$CERT_SHA
+          kernel_certificate_parser_limit=1280
+          exclusive_package_lock=app.nova.utility
+          exclusive_policy_marker=$POLICY_MARKER
+          official_sukisu_manager_trust=false
+          legacy_manager_trust=false
+          final_image_sha256=$IMAGE_SHA
+          pre_kpm_image_sha256=$BEFORE_SHA
+          kpm_packaged_image_sha256=$PACKAGED_SHA
+          susfs=v2.3.0
+          nomount_commit=$NOMOUNT_ACTUAL
+          manager_kernel_pairing=PASS
+          expected_runtime_manager=Nova Utility
+          EOF
+
+          cat NP03J_NOVA_EXCLUSIVE_FINAL_REPORT.txt
+          echo "PASS: FINAL exclusive Nova Utility Manager <-> kernel runtime policy proven artifact-side"
+
+      - name: Upload final proof report
+        uses: actions/upload-artifact@v7
+        with:
+          name: NP03J-NOVA-UTILITY-EXCLUSIVE-FINAL-REPORT
+          path: NP03J_NOVA_EXCLUSIVE_FINAL_REPORT.txt
+          if-no-files-found: error
+          compression-level: 9
