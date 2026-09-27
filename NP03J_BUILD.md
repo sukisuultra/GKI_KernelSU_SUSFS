@@ -20,12 +20,13 @@ Android userspace version does not select KMI. Do not change this target to
 - Integration: built-in
 - Commit mode: `verified`
 - SukiSU kernel pin:
-  `e2912817f4e1b194e582a06e0b5eacf6a3fb7083`
+  `b20dee702035af09cb2ecb5f35443bbc1747f3e6`
 - SukiSU Manager stable pin: `v4.2.0`
 - Manager APK: `SukiSU_v4.2.0_40900-release.apk`
 - Manager APK SHA256:
   `4ca9810e6355fbff0bbe4bf5ce159808e64a40d85987a11894030cd990a6bdf3`
 - Kernel/Manager UAPI at this audited pair: `2`
+- Pin rationale: upstream `e2912817...` did not build because `kernel_umount_feature_set()` was missing. SukiSU fixed exactly that regression in `b20dee7` (#964); the fix changes only `kernel/feature/kernel_umount.c` by adding the missing setter.
 
 ## SUSFS
 
