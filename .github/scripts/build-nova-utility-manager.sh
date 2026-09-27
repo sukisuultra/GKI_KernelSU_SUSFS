@@ -54,7 +54,7 @@ sed -i \
   's/com\.sukisu\.ultra\.ui\.MainActivity/app.nova.utility.ui.MainActivity/g' \
   userspace/ksud/src/late_load.rs
 
-grep -R -n -F 'package app.nova.utility' manager/app/src/main/java/app/nova/utility | head
+grep -R -n -m1 -F 'package app.nova.utility' manager/app/src/main/java/app/nova/utility >/dev/null
 grep -q 'namespace = "app.nova.utility"' manager/app/build.gradle.kts
 grep -q 'Java_app_nova_utility_Natives_' manager/app/src/main/cpp/jni.cc
 grep -q 'app.nova.utility.ui.MainActivity' userspace/ksud/src/late_load.rs
