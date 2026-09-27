@@ -17,7 +17,44 @@ on:
   workflow_dispatch:
 
 jobs:
+  build-nomount-module:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build pinned NoMount metamodule
+        id: buildmod
+        uses: ./.github/actions/nomount-metamodule
+        with:
+          commit: d0f57d5c37ff02aae2299daded57919153240cb3
+
+      - name: Verify NoMount metamodule provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODULE_DIR="${{ steps.buildmod.outputs.module_dir }}"
+          EXPECTED="d0f57d5c37ff02aae2299daded57919153240cb3"
+          test -d "$MODULE_DIR"
+          test -f "$MODULE_DIR/NOMOUNT_SOURCE_COMMIT"
+          ACTUAL="$(tr -d '\r\n' < "$MODULE_DIR/NOMOUNT_SOURCE_COMMIT")"
+          [ "$ACTUAL" = "$EXPECTED" ] || {
+            echo "::error::NoMount metamodule commit mismatch: expected $EXPECTED got $ACTUAL"
+            exit 1
+          }
+          test -x "$MODULE_DIR/bin/nm-arm64"
+          test -x "$MODULE_DIR/bin/nm-arm"
+          echo "PASS: NoMount metamodule source=$ACTUAL"
+
+      - name: Upload NoMount metamodule
+        uses: actions/upload-artifact@v7
+        with:
+          name: NoMount-Metamodule
+          path: ${{ steps.buildmod.outputs.module_dir }}
+          if-no-files-found: error
+          compression-level: 0
+
   build-fullfeatures:
+    needs: build-nomount-module
     uses: ./.github/workflows/prepare.yml
     with:
       config_file: .github/config/android14-6.1.json
