@@ -57,20 +57,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          URL="https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/actions/artifacts/$ARTIFACT_ID/zip"
-          curl --fail --location --show-error --silent \
-            --retry 5 --retry-delay 3 --retry-all-errors \
+          OFFICIAL_URL="https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/actions/artifacts/$ARTIFACT_ID/zip"
+          if curl --fail --location --show-error --silent \
+            --retry 2 --retry-delay 2 --retry-all-errors \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$URL" -o Manager.zip
-
-          ACTUAL_ZIP_SHA="$(sha256sum Manager.zip | awk '{print $1}')"
-          [ "$ACTUAL_ZIP_SHA" = "$ZIP_SHA256" ] || {
-            echo "::error::official Manager artifact ZIP SHA256 mismatch"
-            echo "expected=$ZIP_SHA256"
-            echo "actual=$ACTUAL_ZIP_SHA"
-            exit 1
-          }
+            "$OFFICIAL_URL" -o Manager.zip; then
+            ACTUAL_ZIP_SHA="$(sha256sum Manager.zip | awk '{print $1}')"
+            [ "$ACTUAL_ZIP_SHA" = "$ZIP_SHA256" ] || {
+              echo "::error::official Manager artifact ZIP SHA256 mismatch"
+              echo "expected=$ZIP_SHA256"
+              echo "actual=$ACTUAL_ZIP_SHA"
+              exit 1
+            }
+            echo "PASS transport=official-actions-api"
+          else
+            # GitHub's per-repository GITHUB_TOKEN cannot read artifacts from a
+            # different repository. nightly.link is transport only; the APK is
+            # accepted solely if its SHA256 matches the already-audited official
+            # SukiSU artifact bytes.
+            rm -f Manager.zip
+            FALLBACK_URL="https://nightly.link/SukiSU-Ultra/SukiSU-Ultra/actions/runs/$UPSTREAM_RUN/Manager.zip"
+            curl --fail --location --show-error --silent \
+              --retry 5 --retry-delay 3 --retry-all-errors \
+              "$FALLBACK_URL" -o Manager.zip
+            echo "PASS transport=nightly.link hash-gated mirror"
+          fi
 
           mkdir extracted
           unzip -q Manager.zip -d extracted
