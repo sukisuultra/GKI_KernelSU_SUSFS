@@ -1,0 +1,156 @@
+name: NP03J SukiSU UAPI4 Audit
+
+permissions:
+  contents: write
+  actions: read
+
+on:
+  push:
+    branches:
+      - np03j-uapi4-audit
+    paths:
+      - '.github/scripts/backport-sukisu-builtin-uapi4.py'
+      - '.github/actions/root-setup/action.yml'
+      - '.github/workflows/main.yml'
+      - '.github/workflows/np03j-uapi4-audit.yml'
+  workflow_dispatch:
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      kernel_patches_commit: \${{ steps.refs.outputs.kernel_patches_commit }}
+      anykernel3_commit: \${{ steps.refs.outputs.anykernel3_commit }}
+    steps:
+      - name: Resolve build helper refs
+        id: refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolve() {
+            git ls-remote "$1" "$2" | awk '{print $1; exit}'
+          }
+          KP="$(resolve https://github.com/WildKernels/kernel_patches.git refs/heads/main)"
+          AK="$(resolve https://github.com/WildKernels/AnyKernel3.git refs/heads/gki-2.0)"
+          [[ "$KP" =~ ^[0-9a-f]{40}$ ]] || { echo "bad kernel_patches SHA" >&2; exit 1; }
+          [[ "$AK" =~ ^[0-9a-f]{40}$ ]] || { echo "bad AnyKernel3 SHA" >&2; exit 1; }
+          echo "kernel_patches_commit=$KP" >> "$GITHUB_OUTPUT"
+          echo "anykernel3_commit=$AK" >> "$GITHUB_OUTPUT"
+          echo "kernel_patches=$KP"
+          echo "anykernel3=$AK"
+
+  mirror-manager-40939:
+    runs-on: ubuntu-latest
+    env:
+      APK: SukiSU_v4.2.0_40939-release.apk
+      APK_SHA256: d2c13c10b48b8a365c1ff728272d9079a004f446f7179a6bce9bfe71d617ea18
+      ZIP_SHA256: 9962e37a4defebecae568bd2b3faf56fb608811f8a55343913266dd7adfc12eb
+      ARTIFACT_ID: "10634933691"
+      UPSTREAM_RUN: "35591292466"
+      UPSTREAM_COMMIT: cf87e3f4ddd3f6e5464d85acf56aaa6950e70841
+      RELEASE_TAG: np03j-sukisu-manager-40939
+      GH_TOKEN: \${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download exact official upstream Manager artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/actions/artifacts/$ARTIFACT_ID/zip"
+          curl --fail --location --show-error --silent \
+            --retry 5 --retry-delay 3 --retry-all-errors \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$URL" -o Manager.zip
+
+          ACTUAL_ZIP_SHA="$(sha256sum Manager.zip | awk '{print $1}')"
+          [ "$ACTUAL_ZIP_SHA" = "$ZIP_SHA256" ] || {
+            echo "::error::official Manager artifact ZIP SHA256 mismatch"
+            echo "expected=$ZIP_SHA256"
+            echo "actual=$ACTUAL_ZIP_SHA"
+            exit 1
+          }
+
+          mkdir extracted
+          unzip -q Manager.zip -d extracted
+          [ -f "extracted/$APK" ] || {
+            echo "::error::expected APK missing from official artifact"
+            find extracted -maxdepth 2 -type f -print
+            exit 1
+          }
+
+          ACTUAL_APK_SHA="$(sha256sum "extracted/$APK" | awk '{print $1}')"
+          [ "$ACTUAL_APK_SHA" = "$APK_SHA256" ] || {
+            echo "::error::official Manager APK SHA256 mismatch"
+            echo "expected=$APK_SHA256"
+            echo "actual=$ACTUAL_APK_SHA"
+            exit 1
+          }
+
+          echo "PASS official APK=$APK"
+          echo "PASS sha256=$ACTUAL_APK_SHA"
+
+      - name: Preserve exact APK as permanent release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<EOF
+          Exact byte-for-byte mirror of the official SukiSU-Ultra Manager 40939 artifact.
+
+          Upstream repository: SukiSU-Ultra/SukiSU-Ultra
+          Upstream source commit: $UPSTREAM_COMMIT
+          Upstream workflow run: $UPSTREAM_RUN
+          Upstream artifact ID: $ARTIFACT_ID
+          APK: $APK
+          APK SHA256: $APK_SHA256
+          Artifact ZIP SHA256: $ZIP_SHA256
+
+          This asset is mirrored without modification or re-signing.
+          NP03J production workflow verifies SHA256 before publishing/using it.
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "extracted/$APK" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" "extracted/$APK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "NP03J SukiSU Manager 40939 immutable mirror" \
+              --notes-file "$NOTES"
+          fi
+
+          VERIFY_DIR="$(mktemp -d)"
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$APK" \
+            --dir "$VERIFY_DIR"
+          ACTUAL="$(sha256sum "$VERIFY_DIR/$APK" | awk '{print $1}')"
+          [ "$ACTUAL" = "$APK_SHA256" ] || {
+            echo "::error::mirrored release APK SHA256 mismatch"
+            exit 1
+          }
+          echo "PASS permanent mirror=$RELEASE_TAG/$APK"
+          echo "PASS sha256=$ACTUAL"
+
+  build-uapi4:
+    needs: resolve
+    uses: ./.github/workflows/prepare.yml
+    with:
+      config_file: .github/config/android14-6.1.json
+      feature_set: SUSFS
+      susfs_commit: 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70
+      root_flavor: sukisu-ultra
+      root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
+      nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
+      kernel_patches_commit: \${{ needs.resolve.outputs.kernel_patches_commit }}
+      anykernel3_commit: \${{ needs.resolve.outputs.anykernel3_commit }}
+      droidspaces_commit: ""
+      brand_name: Wild
+      bypass: false
+      use_cache: false
+      os_patch_level: lts
+      variant: SukiSU-UAPI4-Audit
+    secrets: inherit
