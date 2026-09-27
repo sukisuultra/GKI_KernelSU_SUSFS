@@ -258,6 +258,73 @@ jobs:
         sublevel: ${{ steps.extract.outputs.sublevel }}
         root_flavor: ${{ inputs.root_flavor }}
 
+    - name: Validate NP03J SukiSU + SUSFS + KPM inputs
+      if: inputs.root_flavor == 'sukisu-ultra' && (contains(inputs.feature_set, 'SUSFS') || inputs.feature_set == 'All')
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        SUKI_DIR="${{ github.workspace }}/kernel/SukiSU-Ultra"
+        SUSFS_DIR="${{ github.workspace }}/susfs4ksu"
+        DEFCONFIG="${{ github.workspace }}/kernel/common/arch/arm64/configs/gki_defconfig"
+
+        [ -d "$SUKI_DIR/.git" ] || { echo "::error::SukiSU checkout missing"; exit 1; }
+        [ -d "$SUSFS_DIR/.git" ] || { echo "::error::SUSFS checkout missing"; exit 1; }
+        [ -f "$DEFCONFIG" ] || { echo "::error::gki_defconfig missing"; exit 1; }
+
+        ACTUAL_SUKI="$(git -C "$SUKI_DIR" rev-parse HEAD)"
+        ACTUAL_SUSFS="$(git -C "$SUSFS_DIR" rev-parse HEAD)"
+        EXPECTED_SUKI="${{ inputs.root_commit }}"
+        EXPECTED_SUSFS="${{ steps.susfs-cm.outputs.commit }}"
+
+        [ "$ACTUAL_SUKI" = "$EXPECTED_SUKI" ] || {
+          echo "::error::SukiSU SHA mismatch: expected $EXPECTED_SUKI got $ACTUAL_SUKI"
+          exit 1
+        }
+        [ "$ACTUAL_SUSFS" = "$EXPECTED_SUSFS" ] || {
+          echo "::error::SUSFS SHA mismatch: expected $EXPECTED_SUSFS got $ACTUAL_SUSFS"
+          exit 1
+        }
+
+        for key in CONFIG_KSU CONFIG_KPM CONFIG_KSU_SUSFS; do
+          grep -qx "$key=y" "$DEFCONFIG" || {
+            echo "::error::$key is not enabled in effective gki_defconfig"
+            exit 1
+          }
+        done
+
+        grep -Eq '^[[:space:]]*config[[:space:]]+KPM([[:space:]]|$)' "$SUKI_DIR/kernel/Kconfig" || {
+          echo "::error::Selected SukiSU source no longer exposes CONFIG_KPM"
+          exit 1
+        }
+
+        test -f "${{ github.workspace }}/kernel/common/fs/susfs.c" || {
+          echo "::error::SUSFS fs/susfs.c was not integrated"
+          exit 1
+        }
+        test -f "${{ github.workspace }}/kernel/common/include/linux/susfs.h" || {
+          echo "::error::SUSFS header was not integrated"
+          exit 1
+        }
+
+        REJECT="$(find "${{ github.workspace }}/kernel" "$SUSFS_DIR" -type f -name '*.rej' -print -quit 2>/dev/null || true)"
+        [ -z "$REJECT" ] || {
+          echo "::error::Patch reject found: $REJECT"
+          exit 1
+        }
+
+        SUSFS_VERSION="$(grep '^#define SUSFS_VERSION' "${{ github.workspace }}/kernel/common/include/linux/susfs.h" | awk -F'"' '{print $2}')"
+        {
+          echo "SUKISU_VERIFIED_SHA=$ACTUAL_SUKI"
+          echo "SUSFS_VERIFIED_SHA=$ACTUAL_SUSFS"
+          echo "SUSFS_VERIFIED_VERSION=$SUSFS_VERSION"
+        } >> "$GITHUB_ENV"
+
+        echo "PASS: SukiSU SHA=$ACTUAL_SUKI"
+        echo "PASS: SUSFS SHA=$ACTUAL_SUSFS version=$SUSFS_VERSION"
+        echo "PASS: CONFIG_KSU=y CONFIG_KPM=y CONFIG_KSU_SUSFS=y"
+        echo "PASS: no patch rejects"
+
     - name: Fix selinux_hide pointer-bool-conversion on 6.6+ (ALL branches)
       shell: bash
       run: |
@@ -510,6 +577,7 @@ jobs:
       uses: ./.github/actions/build-kernel
       with:
         version: ${{ inputs.version }}
+        root_flavor: ${{ inputs.root_flavor }}
 
     - name: Get Cache Stats
       uses: ./.github/actions/cache-stats
@@ -557,6 +625,7 @@ jobs:
       uses: ./.github/actions/build-kernel
       with:
         version: ${{ inputs.version }}
+        root_flavor: ${{ inputs.root_flavor }}
 
     - name: Consolidated Build Summary
       if: always()
