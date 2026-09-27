@@ -195,9 +195,11 @@ jobs:
           # b20dee7 is the official one-commit SukiSU builtin fix (#964).
           PIN_SUKISU_ULTRA="b20dee702035af09cb2ecb5f35443bbc1747f3e6"
           # NP03J production manager pin. Update only after compatibility audit.
-          PIN_SUKISU_MANAGER_TAG="v4.2.0"
-          PIN_SUKISU_MANAGER_APK="SukiSU_v4.2.0_40900-release.apk"
-          PIN_SUKISU_MANAGER_SHA256="4ca9810e6355fbff0bbe4bf5ce159808e64a40d85987a11894030cd990a6bdf3"
+          PIN_SUKISU_MANAGER_SOURCE_COMMIT="cf87e3f4ddd3f6e5464d85acf56aaa6950e70841"
+          PIN_SUKISU_MANAGER_RUN_ID="35591292466"
+          PIN_SUKISU_MANAGER_ARTIFACT="Manager"
+          PIN_SUKISU_MANAGER_APK="SukiSU_v4.2.0_40939-release.apk"
+          PIN_SUKISU_MANAGER_SHA256="d2c13c10b48b8a365c1ff728272d9079a004f446f7179a6bce9bfe71d617ea18"
           declare -A PIN_SUSFS=(
             [susfs_commit_android12_5_10]="ec785f47d49f7b3871ca9356f450411020af7017"
             [susfs_commit_android13_5_10]="ed3d6d9c9a2652e1c70f153f5358701e996d646c"
@@ -369,9 +371,11 @@ jobs:
           set -euo pipefail
 
           # Production SukiSU Manager pin for verified mode.
-          PIN_SUKISU_MANAGER_TAG="v4.2.0"
-          PIN_SUKISU_MANAGER_APK="SukiSU_v4.2.0_40900-release.apk"
-          PIN_SUKISU_MANAGER_SHA256="4ca9810e6355fbff0bbe4bf5ce159808e64a40d85987a11894030cd990a6bdf3"
+          PIN_SUKISU_MANAGER_SOURCE_COMMIT="cf87e3f4ddd3f6e5464d85acf56aaa6950e70841"
+          PIN_SUKISU_MANAGER_RUN_ID="35591292466"
+          PIN_SUKISU_MANAGER_ARTIFACT="Manager"
+          PIN_SUKISU_MANAGER_APK="SukiSU_v4.2.0_40939-release.apk"
+          PIN_SUKISU_MANAGER_SHA256="d2c13c10b48b8a365c1ff728272d9079a004f446f7179a6bce9bfe71d617ea18"
 
           # Credit: authenticated gh-API manager lookup adapted from EmberHeart-Kernels
           # commit ae9a341 (nullptr-t-oss/composite_actions fetch_ksu_manager).
@@ -446,9 +450,12 @@ jobs:
               sukisu-ultra)
                 owner="SukiSU-Ultra"; repo="SukiSU-Ultra"
                 if [ "${{ inputs.commit_mode || 'verified' }}" = "verified" ]; then
-                  manager_tag="${PIN_SUKISU_MANAGER_TAG}"
-                  manager_apk="${PIN_SUKISU_MANAGER_APK}"
-                  manager_sha="${PIN_SUKISU_MANAGER_SHA256}"
+                  # Exact official 40939 Manager from upstream Build Manager run.
+                  # Do not rebuild or re-sign: the current NP03J kernel binding
+                  # trusts the upstream production certificate.
+                  printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"%s","apk":"%s","sha256":"%s"}' \
+                    "$flavor" "$owner" "$repo" "$PIN_SUKISU_MANAGER_RUN_ID" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
+                    "$PIN_SUKISU_MANAGER_ARTIFACT" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
                 else
                   rel=$(gh api "repos/${owner}/${repo}/releases/latest")
                   manager_tag=$(echo "$rel" | jq -r '.tag_name')
@@ -458,9 +465,9 @@ jobs:
                     echo "ERROR: latest stable SukiSU release is missing tag/APK/digest metadata" >&2
                     exit 1
                   fi
+                  printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"release","run_id":0,"stock":"%s","tag":"%s","want":"%s","sha256":"%s"}' \
+                    "$flavor" "$owner" "$repo" "$manager_tag" "$manager_tag" "$manager_apk" "$manager_sha"
                 fi
-                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"release","run_id":0,"stock":"%s","tag":"%s","want":"%s","sha256":"%s"}' \
-                  "$flavor" "$owner" "$repo" "$manager_tag" "$manager_tag" "$manager_apk" "$manager_sha"
                 ;;
               kowsu)
                 owner="KOWX712"; repo="KernelSU"; wf="build-manager.yml"
@@ -585,6 +592,7 @@ jobs:
             WANT=$(echo "$M" | jq -r '.want // ""')
             TAG=$(echo "$M" | jq -r '.tag // ""')
             EXPECTED_SHA256=$(echo "$M" | jq -r '.sha256 // ""')
+            EXPECTED_APK=$(echo "$M" | jq -r '.apk // ""')
             DLDIR="dl_${REPO}"
             mkdir -p "$DLDIR"
             (
@@ -650,6 +658,19 @@ jobs:
                   for apk in _${AID}/*.apk; do
                     [ -f "$apk" ] || continue
                     NAME="$(basename "$apk")"
+                    if [ -n "$EXPECTED_APK" ] && [ "$NAME" != "$EXPECTED_APK" ]; then
+                      echo "Skipping unexpected APK $NAME; expected $EXPECTED_APK" >&2
+                      continue
+                    fi
+                    if [ -n "$EXPECTED_SHA256" ]; then
+                      ACTUAL_SHA256=$(sha256sum "$apk" | awk '{print $1}')
+                      [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ] || {
+                        echo "ERROR: manager APK SHA256 mismatch for $NAME" >&2
+                        echo "Expected: $EXPECTED_SHA256" >&2
+                        echo "Actual:   $ACTUAL_SHA256" >&2
+                        exit 1
+                      }
+                    fi
                     cp -f "$apk" "$OUT_APKS/$NAME"
                     echo "$OWNER|$REPO|$NAME" >> "$MANIFEST"
                   done
