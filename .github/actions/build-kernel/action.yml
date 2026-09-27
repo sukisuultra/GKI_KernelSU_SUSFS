@@ -166,6 +166,20 @@ runs:
           echo "::error::AnyKernel3/Image does not match the verified KPM-patched Image."
           exit 1
         }
+
+        if [ -n "${CUSTOM_MANAGER_CERT_SHA256:-}" ]; then
+          grep -aFq "$CUSTOM_MANAGER_CERT_SHA256" "${{ github.workspace }}/AnyKernel3/Image" || {
+            echo "::error::Final packaged Image does not contain the custom Manager certificate hash."
+            echo "Expected: $CUSTOM_MANAGER_CERT_SHA256"
+            exit 1
+          }
+          grep -aFq "947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef" "${{ github.workspace }}/AnyKernel3/Image" || {
+            echo "::error::Final packaged Image lost the official SukiSU Manager certificate hash."
+            exit 1
+          }
+          echo "PASS: final Image contains official + Nova Utility Manager trust hashes"
+        fi
+
         echo "KPM_PACKAGED_IMAGE_SHA256=$PACKAGED_SHA256" >> "$GITHUB_ENV"
         echo "Verified KPM-patched Image packaged: $PACKAGED_SHA256"
         exit 0
