@@ -19,8 +19,8 @@ jobs:
   resolve:
     runs-on: ubuntu-latest
     outputs:
-      kernel_patches_commit: \${{ steps.refs.outputs.kernel_patches_commit }}
-      anykernel3_commit: \${{ steps.refs.outputs.anykernel3_commit }}
+      kernel_patches_commit: ${{ steps.refs.outputs.kernel_patches_commit }}
+      anykernel3_commit: ${{ steps.refs.outputs.anykernel3_commit }}
     steps:
       - name: Resolve build helper refs
         id: refs
@@ -49,7 +49,7 @@ jobs:
       UPSTREAM_RUN: "35591292466"
       UPSTREAM_COMMIT: cf87e3f4ddd3f6e5464d85acf56aaa6950e70841
       RELEASE_TAG: np03j-sukisu-manager-40939
-      GH_TOKEN: \${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
 
@@ -157,8 +157,8 @@ jobs:
       root_flavor: sukisu-ultra
       root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
       nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
-      kernel_patches_commit: \${{ needs.resolve.outputs.kernel_patches_commit }}
-      anykernel3_commit: \${{ needs.resolve.outputs.anykernel3_commit }}
+      kernel_patches_commit: ${{ needs.resolve.outputs.kernel_patches_commit }}
+      anykernel3_commit: ${{ needs.resolve.outputs.anykernel3_commit }}
       droidspaces_commit: ""
       brand_name: Wild
       bypass: false
