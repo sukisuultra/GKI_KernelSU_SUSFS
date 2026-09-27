@@ -457,17 +457,19 @@ jobs:
                   MIRROR_REPO="${GITHUB_REPOSITORY}"
                   MIRROR_OWNER="${MIRROR_REPO%%/*}"
                   MIRROR_NAME="${MIRROR_REPO#*/}"
-                  if gh api "repos/${MIRROR_REPO}/releases/tags/${MIRROR_TAG}" 2>/dev/null \
-                       | jq -r --arg n "$PIN_SUKISU_MANAGER_APK" '.assets[] | select(.name == $n) | .name' \
-                       | grep -qx "$PIN_SUKISU_MANAGER_APK"; then
-                    printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"release","run_id":0,"stock":"%s","tag":"%s","want":"%s","sha256":"%s"}' \
-                      "$flavor" "$MIRROR_OWNER" "$MIRROR_NAME" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
-                      "$MIRROR_TAG" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
-                  else
-                    printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"%s","apk":"%s","sha256":"%s"}' \
-                      "$flavor" "$owner" "$repo" "$PIN_SUKISU_MANAGER_RUN_ID" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
-                      "$PIN_SUKISU_MANAGER_ARTIFACT" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
+                  MIRROR_JSON="$(gh api "repos/${MIRROR_REPO}/releases/tags/${MIRROR_TAG}" 2>/dev/null || true)"
+                  MIRROR_DIGEST="$(printf '%s' "$MIRROR_JSON" | jq -r --arg n "$PIN_SUKISU_MANAGER_APK" \
+                    '.assets[]? | select(.name == $n) | (.digest // "")' | head -n1)"
+                  if [ "$MIRROR_DIGEST" != "sha256:$PIN_SUKISU_MANAGER_SHA256" ]; then
+                    echo "ERROR: immutable SukiSU Manager 40939 mirror missing or digest mismatch" >&2
+                    echo "Expected asset: $PIN_SUKISU_MANAGER_APK" >&2
+                    echo "Expected digest: sha256:$PIN_SUKISU_MANAGER_SHA256" >&2
+                    echo "Actual digest: ${MIRROR_DIGEST:-missing}" >&2
+                    exit 1
                   fi
+                  printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"release","run_id":0,"stock":"%s","tag":"%s","want":"%s","sha256":"%s"}' \
+                    "$flavor" "$MIRROR_OWNER" "$MIRROR_NAME" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
+                    "$MIRROR_TAG" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
                 else
                   rel=$(gh api "repos/${owner}/${repo}/releases/latest")
                   manager_tag=$(echo "$rel" | jq -r '.tag_name')
