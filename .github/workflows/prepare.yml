@@ -76,6 +76,16 @@ on:
         required: false
         type: string
         default: ""
+      custom_manager_cert_size:
+        description: "Optional trusted custom SukiSU Manager certificate DER size (hex)"
+        required: false
+        type: string
+        default: ""
+      custom_manager_cert_hash:
+        description: "Optional trusted custom SukiSU Manager certificate SHA256"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   generate-matrix:
@@ -183,4 +193,6 @@ jobs:
       brand_name: ${{ inputs.brand_name }}
       bypass: ${{ inputs.bypass }}
       use_cache: ${{ inputs.use_cache }}
+      custom_manager_cert_size: ${{ inputs.custom_manager_cert_size }}
+      custom_manager_cert_hash: ${{ inputs.custom_manager_cert_hash }}
     secrets: inherit
