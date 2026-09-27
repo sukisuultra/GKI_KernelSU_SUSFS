@@ -191,7 +191,9 @@ jobs:
           PIN_NOMOUNT="d0f57d5c37ff02aae2299daded57919153240cb3"
           PIN_KERNELSU="3c1240625655978f319a98398031100b80e9da7c"
           PIN_RESUKISU="3c1882886dbbb54f4aae7ddf205f8ccde32c2a34"
-          PIN_SUKISU_ULTRA="e2912817f4e1b194e582a06e0b5eacf6a3fb7083"
+          # e2912817 was broken upstream: missing kernel_umount_feature_set().
+          # b20dee7 is the official one-commit SukiSU builtin fix (#964).
+          PIN_SUKISU_ULTRA="b20dee702035af09cb2ecb5f35443bbc1747f3e6"
           # NP03J production manager pin. Update only after compatibility audit.
           PIN_SUKISU_MANAGER_TAG="v4.2.0"
           PIN_SUKISU_MANAGER_APK="SukiSU_v4.2.0_40900-release.apk"
