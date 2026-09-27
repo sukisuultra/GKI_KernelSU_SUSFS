@@ -198,6 +198,21 @@ jobs:
       - kernel
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout exact workflow commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Verify forensic scripts are present and syntactically valid
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${{ github.workspace }}/.github/scripts/verify-nova-exclusive-image.py"
+          test -f "${{ github.workspace }}/.github/scripts/patch-nova-exclusive-manager.py"
+          python3 -m py_compile             "${{ github.workspace }}/.github/scripts/verify-nova-exclusive-image.py"             "${{ github.workspace }}/.github/scripts/patch-nova-exclusive-manager.py"
+          echo "PASS: forensic scripts checked out from commit ${GITHUB_SHA}"
+          echo "PASS: forensic scripts compile successfully"
+
       - name: Download final AnyKernel3
         uses: actions/download-artifact@v8
         with:
