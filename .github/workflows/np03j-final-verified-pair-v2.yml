@@ -1,0 +1,333 @@
+name: NP03J FINAL Verified Nova Utility Pair V2
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - np03j-final-verified-pair-v2
+    paths:
+      - '.github/workflows/np03j-final-verified-pair-v2.yml'
+      - '.github/workflows/prepare.yml'
+      - '.github/workflows/build.yml'
+      - '.github/actions/**'
+      - '.github/scripts/backport-sukisu-builtin-uapi4.py'
+
+concurrency:
+  group: np03j-final-verified-pair-v2
+  cancel-in-progress: true
+
+env:
+  MANAGER_SOURCE_RUN: "36338545396"
+  MANAGER_SOURCE_ARTIFACT: Nova-Utility-Manager-40939-CrashFix
+  MANAGER_APK_SHA256: 657c228e406a89f7e954063313c01fd3ae542f9960767d0f5436212f7c139c59
+  MANAGER_CERT_SHA256: 2b3d2c321a6b61090565e417cb020bfac1f4330d104481e80ed65aff632d94d4
+  MANAGER_CERT_SIZE_HEX: "0x424"
+  OFFICIAL_SUKISU_CERT_SHA256: 947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef
+  NOMOUNT_COMMIT: d0f57d5c37ff02aae2299daded57919153240cb3
+
+jobs:
+  reuse-crashfix-manager:
+    name: Reuse exact tested Nova Utility CrashFix Manager
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      expected_size2: ${{ steps.identity.outputs.expected_size2 }}
+      expected_hash2: ${{ steps.identity.outputs.expected_hash2 }}
+      apk_sha256: ${{ steps.identity.outputs.apk_sha256 }}
+    steps:
+      - name: Download exact tested Manager artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.MANAGER_SOURCE_ARTIFACT }}
+          path: final-manager
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.MANAGER_SOURCE_RUN }}
+
+      - name: Verify exact immutable Manager bytes, certificate, package metadata and ksud binding
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="final-manager/Nova-Utility-v4.2.0-40939-spoofed.apk"
+          CERT="final-manager/Nova-Utility-40939-cert.der"
+          INFO="final-manager/Nova-Utility-ManagerInfo.txt"
+          SIGN="final-manager/apksigner.txt"
+
+          test -f "$APK"
+          test -f "$CERT"
+          test -f "$INFO"
+          test -f "$SIGN"
+
+          ACTUAL_APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          ACTUAL_CERT_SHA="$(sha256sum "$CERT" | awk '{print $1}')"
+          CERT_SIZE_DEC="$(stat -c%s "$CERT")"
+          ACTUAL_CERT_SIZE_HEX="$(printf '0x%x' "$CERT_SIZE_DEC")"
+
+          [ "$ACTUAL_APK_SHA" = "$MANAGER_APK_SHA256" ] || {
+            echo "::error::Manager APK SHA256 mismatch"
+            echo "expected=$MANAGER_APK_SHA256"
+            echo "actual=$ACTUAL_APK_SHA"
+            exit 1
+          }
+
+          [ "$ACTUAL_CERT_SHA" = "$MANAGER_CERT_SHA256" ] || {
+            echo "::error::Manager certificate SHA256 mismatch"
+            echo "expected=$MANAGER_CERT_SHA256"
+            echo "actual=$ACTUAL_CERT_SHA"
+            exit 1
+          }
+
+          [ "$ACTUAL_CERT_SIZE_HEX" = "$MANAGER_CERT_SIZE_HEX" ] || {
+            echo "::error::Manager certificate size mismatch"
+            echo "expected=$MANAGER_CERT_SIZE_HEX"
+            echo "actual=$ACTUAL_CERT_SIZE_HEX"
+            exit 1
+          }
+
+          grep -Fxq 'app_name=Nova Utility' "$INFO"
+          grep -Fxq 'package=app.nova.utility' "$INFO"
+          grep -Fxq 'version_name=v4.2.0' "$INFO"
+          grep -Fxq 'version_code=40939' "$INFO"
+          grep -Fxq 'uapi=4' "$INFO"
+          grep -Fxq 'source_commit=cf87e3f4ddd3f6e5464d85acf56aaa6950e70841' "$INFO"
+          grep -Fxq 'ksud_package_binding=app.nova.utility' "$INFO"
+          grep -Fxq 'deterministic_spoof=true' "$INFO"
+
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' "$SIGN"
+
+          rm -rf /tmp/nova-apk
+          mkdir -p /tmp/nova-apk
+          unzip -q "$APK" 'lib/arm64-v8a/libksud.so' -d /tmp/nova-apk
+          KSUD="/tmp/nova-apk/lib/arm64-v8a/libksud.so"
+          test -f "$KSUD"
+          grep -aFq 'app.nova.utility' "$KSUD"
+          grep -aFq 'app.nova.utility.ui.MainActivity' "$KSUD"
+          if grep -aFq 'com.sukisu.ultra.ui.MainActivity' "$KSUD"; then
+            echo "::error::Old SukiSU MainActivity binding remains in tested CrashFix Manager"
+            exit 1
+          fi
+
+          echo "expected_size2=$MANAGER_CERT_SIZE_HEX" >> "$GITHUB_OUTPUT"
+          echo "expected_hash2=$MANAGER_CERT_SHA256" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=$MANAGER_APK_SHA256" >> "$GITHUB_OUTPUT"
+
+          echo "PASS: exact user-tested CrashFix Manager reused"
+          echo "PASS: package=app.nova.utility versionCode=40939 UAPI=4"
+          echo "PASS: APK SHA256=$MANAGER_APK_SHA256"
+          echo "PASS: cert size=$MANAGER_CERT_SIZE_HEX"
+          echo "PASS: cert SHA256=$MANAGER_CERT_SHA256"
+          echo "PASS: ksud package/activity binding=app.nova.utility"
+
+      - name: Upload exact paired Manager
+        uses: actions/upload-artifact@v7
+        with:
+          name: Nova-Utility-Manager-40939-CrashFix-FINAL
+          path: final-manager/**
+          if-no-files-found: error
+          compression-level: 9
+
+  build-nomount-module:
+    name: Build exact pinned NoMount metamodule
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build NoMount
+        id: buildmod
+        uses: ./.github/actions/nomount-metamodule
+        with:
+          commit: d0f57d5c37ff02aae2299daded57919153240cb3
+
+      - name: Verify NoMount provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODULE_DIR="${{ steps.buildmod.outputs.module_dir }}"
+          ACTUAL="$(tr -d '\r\n' < "$MODULE_DIR/NOMOUNT_SOURCE_COMMIT")"
+          [ "$ACTUAL" = "$NOMOUNT_COMMIT" ]
+          test -x "$MODULE_DIR/bin/nm-arm64"
+          test -x "$MODULE_DIR/bin/nm-arm"
+          echo "PASS NoMount=$ACTUAL"
+
+      - name: Upload NoMount metamodule
+        uses: actions/upload-artifact@v7
+        with:
+          name: NoMount-Metamodule
+          path: ${{ steps.buildmod.outputs.module_dir }}
+          if-no-files-found: error
+          compression-level: 0
+
+  build-final-kernel:
+    name: Build kernel paired to exact CrashFix Manager certificate
+    needs:
+      - reuse-crashfix-manager
+      - build-nomount-module
+    uses: ./.github/workflows/prepare.yml
+    with:
+      config_file: .github/config/android14-6.1.json
+      feature_set: SUSFS+NoMount+BBG+NET+DS+NTSync+Ptrace+Unicode+BPF
+      susfs_commit: 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70
+      root_flavor: sukisu-ultra
+      root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
+      nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
+      kernel_patches_commit: 41ae18b35d20e0c6ac04116785a4a1089528ae94
+      anykernel3_commit: e1e9dce98430c5c6f231f7094a8c7f4ecaf50948
+      droidspaces_commit: cff50fa04d50472b607ba6822e8bf482b19cd427
+      brand_name: Wild
+      bypass: false
+      use_cache: false
+      os_patch_level: lts
+      variant: SukiSU-FINAL-NovaUtility-VerifiedPair-FullFeatures
+      custom_manager_expected_size2: ${{ needs.reuse-crashfix-manager.outputs.expected_size2 }}
+      custom_manager_expected_hash2: ${{ needs.reuse-crashfix-manager.outputs.expected_hash2 }}
+    secrets: inherit
+
+  forensic-final-pair:
+    name: Fail-closed forensic verification of final Manager + Image
+    needs:
+      - reuse-crashfix-manager
+      - build-nomount-module
+      - build-final-kernel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download final AnyKernel3 artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*NovaUtility-VerifiedPair-FullFeatures-AnyKernel3'
+          path: final-kernel
+          merge-multiple: true
+
+      - name: Download final BuildInfo artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*NovaUtility-VerifiedPair-FullFeatures-BuildInfo'
+          path: final-buildinfo
+          merge-multiple: true
+
+      - name: Download paired Manager artifact from this run
+        uses: actions/download-artifact@v8
+        with:
+          name: Nova-Utility-Manager-40939-CrashFix-FINAL
+          path: final-manager
+
+      - name: Download paired NoMount artifact from this run
+        uses: actions/download-artifact@v8
+        with:
+          name: NoMount-Metamodule
+          path: final-nomount
+
+      - name: Verify final pair byte-for-byte and fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="$(find final-kernel -type f -name Image -print -quit)"
+          SUMMARY="$(find final-buildinfo -type f -name '*.md' -print -quit)"
+          APK="final-manager/Nova-Utility-v4.2.0-40939-spoofed.apk"
+          CERT="final-manager/Nova-Utility-40939-cert.der"
+          NOMOUNT_COMMIT_FILE="$(find final-nomount -type f -name NOMOUNT_SOURCE_COMMIT -print -quit)"
+
+          test -n "$IMAGE"
+          test -s "$IMAGE"
+          test -n "$SUMMARY"
+          test -s "$SUMMARY"
+          test -f "$APK"
+          test -f "$CERT"
+          test -n "$NOMOUNT_COMMIT_FILE"
+
+          APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          CERT_SHA="$(sha256sum "$CERT" | awk '{print $1}')"
+          CERT_SIZE_HEX="$(printf '0x%x' "$(stat -c%s "$CERT")")"
+          IMAGE_SHA="$(sha256sum "$IMAGE" | awk '{print $1}')"
+
+          [ "$APK_SHA" = "$MANAGER_APK_SHA256" ]
+          [ "$CERT_SHA" = "$MANAGER_CERT_SHA256" ]
+          [ "$CERT_SIZE_HEX" = "$MANAGER_CERT_SIZE_HEX" ]
+
+          grep -aFq "$MANAGER_CERT_SHA256" "$IMAGE" || {
+            echo "::error::FINAL Image does not contain exact Nova Utility CrashFix certificate hash"
+            exit 1
+          }
+
+          grep -aFq "$OFFICIAL_SUKISU_CERT_SHA256" "$IMAGE" || {
+            echo "::error::FINAL Image does not contain official SukiSU certificate hash"
+            exit 1
+          }
+
+          PACKAGED_SHA="$(awk -F'|' '/\*\*Packaged Image SHA256\*\*/ {gsub(/[[:space:]]/,"",$3); print $3; exit}' "$SUMMARY")"
+          BEFORE_SHA="$(awk -F'|' '/\*\*Image SHA256 before KPM\*\*/ {gsub(/[[:space:]]/,"",$3); print $3; exit}' "$SUMMARY")"
+
+          [[ "$PACKAGED_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BEFORE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [ "$IMAGE_SHA" = "$PACKAGED_SHA" ] || {
+            echo "::error::Final downloaded Image SHA does not match BuildInfo packaged Image SHA"
+            echo "actual=$IMAGE_SHA"
+            echo "buildinfo=$PACKAGED_SHA"
+            exit 1
+          }
+
+          [ "$BEFORE_SHA" != "$PACKAGED_SHA" ] || {
+            echo "::error::KPM-patched Image did not change from pre-patch Image"
+            exit 1
+          }
+
+          grep -Fq '| **CONFIG_KPM** | y |' "$SUMMARY"
+          grep -Fq '| **KernelPatch Version** | 0.13.0 |' "$SUMMARY"
+          grep -Fq '| **KernelPatch Commit** | 762e6fb446f58020691b83509873268f6af634f2 |' "$SUMMARY"
+          grep -Fq '| **SUSFS Version** | v2.3.0 |' "$SUMMARY"
+          grep -Fq '| **SUSFS Commit** | 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70 |' "$SUMMARY"
+          grep -Fq '| **NoMount Commit** | d0f57d5c37ff02aae2299daded57919153240cb3 |' "$SUMMARY"
+          grep -Fq '| **Feature Set** | SUSFS+NoMount+BBG+NET+DS+NTSync+Ptrace+Unicode+BPF |' "$SUMMARY"
+
+          NOMOUNT_ACTUAL="$(tr -d '\r\n' < "$NOMOUNT_COMMIT_FILE")"
+          [ "$NOMOUNT_ACTUAL" = "$NOMOUNT_COMMIT" ]
+
+          SUBLEVEL="$(python3 - "$IMAGE" <<'PY'
+          import re
+          import sys
+          data = open(sys.argv[1], "rb").read()
+          match = re.search(rb"Linux version 6\\.1\\.([0-9]+)-android14-Wild", data)
+          if not match:
+              raise SystemExit("Linux 6.1.x-android14-Wild banner not found in final Image")
+          print(match.group(1).decode())
+          PY
+          )"
+          [[ "$SUBLEVEL" =~ ^[0-9]+$ ]]
+          grep -aFq "Linux version 6.1.$SUBLEVEL-android14-Wild" "$IMAGE"
+
+          cat > FINAL_PAIR_REPORT.txt <<EOF
+          status=PASS
+          manager_package=app.nova.utility
+          manager_version_code=40939
+          manager_uapi=4
+          manager_apk_sha256=$APK_SHA
+          manager_certificate_size=$CERT_SIZE_HEX
+          manager_certificate_sha256=$CERT_SHA
+          official_sukisu_certificate_sha256=$OFFICIAL_SUKISU_CERT_SHA256
+          final_image_sha256=$IMAGE_SHA
+          pre_kpm_image_sha256=$BEFORE_SHA
+          kpm_packaged_image_sha256=$PACKAGED_SHA
+          kernel=6.1.$SUBLEVEL-android14-Wild
+          susfs=v2.3.0
+          nomount_commit=$NOMOUNT_ACTUAL
+          final_image_contains_nova_utility_trust=true
+          final_image_contains_official_sukisu_trust=true
+          manager_kernel_pairing=PASS
+          EOF
+
+          cat FINAL_PAIR_REPORT.txt
+          echo "PASS: FINAL Nova Utility CrashFix Manager <-> kernel trust pairing proven in packaged Image"
+
+      - name: Upload final forensic report
+        uses: actions/upload-artifact@v7
+        with:
+          name: NP03J-FINAL-VERIFIED-PAIR-V2-REPORT
+          path: FINAL_PAIR_REPORT.txt
+          if-no-files-found: error
+          compression-level: 9
