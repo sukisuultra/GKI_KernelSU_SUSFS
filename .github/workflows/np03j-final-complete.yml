@@ -1,0 +1,207 @@
+name: NP03J Final Complete Build
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  push:
+    branches:
+      - np03j-final-full
+    paths:
+      - '.github/workflows/np03j-final-complete.yml'
+      - '.github/workflows/prepare.yml'
+      - '.github/workflows/build.yml'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+  workflow_dispatch:
+
+jobs:
+  build-custom-manager:
+    runs-on: ubuntu-latest
+    outputs:
+      cert_size: \${{ steps.manager.outputs.cert_size }}
+      cert_hash: \${{ steps.manager.outputs.cert_hash }}
+      apk_sha256: \${{ steps.manager.outputs.apk_sha256 }}
+      apk_name: \${{ steps.manager.outputs.apk_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r29
+
+      - name: Prepare Rust
+        shell: bash
+        run: rustup update stable
+
+      - name: Build and verify Nova Utility Manager
+        id: manager
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: \${{ steps.setup-ndk.outputs.ndk-path }}
+        run: bash .github/scripts/build-nova-utility-manager.sh
+
+      - name: Upload Nova Utility Manager
+        uses: actions/upload-artifact@v7
+        with:
+          name: Nova-Utility-Manager-40939
+          path: |
+            SukiSU-Manager-Source/dist/Nova_Utility_v4.2.0-spoofed_40939.apk
+            SukiSU-Manager-Source/dist/Nova_Utility_Manager_40939_BUILD_INFO.txt
+            SukiSU-Manager-Source/dist/Nova_Utility_Manager_Certificate.der
+          if-no-files-found: error
+          compression-level: 9
+
+  build-nomount-module:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build pinned NoMount metamodule
+        id: buildmod
+        uses: ./.github/actions/nomount-metamodule
+        with:
+          commit: d0f57d5c37ff02aae2299daded57919153240cb3
+
+      - name: Verify NoMount metamodule provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODULE_DIR="\${{ steps.buildmod.outputs.module_dir }}"
+          EXPECTED="d0f57d5c37ff02aae2299daded57919153240cb3"
+          ACTUAL="$(tr -d '\r\n' < "$MODULE_DIR/NOMOUNT_SOURCE_COMMIT")"
+          [ "$ACTUAL" = "$EXPECTED" ]
+          test -x "$MODULE_DIR/bin/nm-arm64"
+          test -x "$MODULE_DIR/bin/nm-arm"
+          echo "PASS: NoMount metamodule source=$ACTUAL"
+
+      - name: Upload NoMount metamodule
+        uses: actions/upload-artifact@v7
+        with:
+          name: NoMount-Metamodule
+          path: \${{ steps.buildmod.outputs.module_dir }}
+          if-no-files-found: error
+          compression-level: 0
+
+  build-fullfeatures:
+    needs:
+      - build-custom-manager
+      - build-nomount-module
+    uses: ./.github/workflows/prepare.yml
+    with:
+      config_file: .github/config/android14-6.1.json
+      feature_set: SUSFS+NoMount+BBG+NET+DS+NTSync+Ptrace+Unicode+BPF
+      susfs_commit: 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70
+      root_flavor: sukisu-ultra
+      root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
+      nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
+      kernel_patches_commit: 41ae18b35d20e0c6ac04116785a4a1089528ae94
+      anykernel3_commit: e1e9dce98430c5c6f231f7094a8c7f4ecaf50948
+      droidspaces_commit: cff50fa04d50472b607ba6822e8bf482b19cd427
+      brand_name: Wild
+      bypass: false
+      use_cache: false
+      os_patch_level: lts
+      variant: NP03J-Final-Full
+      custom_manager_cert_size: \${{ needs.build-custom-manager.outputs.cert_size }}
+      custom_manager_cert_hash: \${{ needs.build-custom-manager.outputs.cert_hash }}
+    secrets: inherit
+
+  final-bundle:
+    needs:
+      - build-custom-manager
+      - build-nomount-module
+      - build-fullfeatures
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: \${{ github.token }}
+      RELEASE_TAG: np03j-final-40939-uapi4-fullfeatures
+      MANAGER_CERT_SIZE: \${{ needs.build-custom-manager.outputs.cert_size }}
+      MANAGER_CERT_HASH: \${{ needs.build-custom-manager.outputs.cert_hash }}
+      MANAGER_APK_SHA: \${{ needs.build-custom-manager.outputs.apk_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: Nova-Utility-Manager-40939
+          path: staging/manager
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: NoMount-Metamodule
+          path: staging/nomount
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: 6.1.177-android14-lts-NP03J-Final-Full-AnyKernel3
+          path: staging/kernel
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: 6.1.177-android14-lts-NP03J-Final-Full-BuildInfo
+          path: staging/buildinfo
+
+      - name: Download and verify official Manager fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging/fallback
+          gh release download np03j-sukisu-manager-40939 \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern SukiSU_v4.2.0_40939-release.apk \
+            --dir staging/fallback
+          ACTUAL="$(sha256sum staging/fallback/SukiSU_v4.2.0_40939-release.apk | awk '{print $1}')"
+          EXPECTED="d2c13c10b48b8a365c1ff728272d9079a004f446f7179a6bce9bfe71d617ea18"
+          [ "$ACTUAL" = "$EXPECTED" ]
+
+      - name: Build and verify final bundle
+        shell: bash
+        run: bash .github/scripts/package-np03j-final.sh
+
+      - name: Upload complete final bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: NP03J-FINAL-COMPLETE-40939
+          path: final/
+          if-no-files-found: error
+          compression-level: 9
+
+      - name: Publish permanent final release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<'EOF'
+          NP03J final complete build.
+
+          Kernel: 6.1.177-android14-Wild
+          SukiSU Ultra: 40939 / UAPI4 / BUILT-IN
+          Manager: Nova Utility
+          Package: app.nova.utility
+          SUSFS: v2.3.0
+          KPM: enabled, KernelPatch 0.13.0
+          Features: NoMount, Baseband Guard, Networking, DroidSpaces, NTSync, Unicode Fix, BTF/eBPF/FUSE-BPF
+          Performance: disabled
+          Release-notes preview: disabled
+
+          The custom Manager private signing key is deliberately not published.
+          EOF
+          gh release create "$RELEASE_TAG" final/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "NP03J Final 40939 UAPI4 Full Features" \
+            --notes-file "$NOTES"
+          echo "PASS: permanent release $RELEASE_TAG published"
