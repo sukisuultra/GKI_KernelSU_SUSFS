@@ -192,6 +192,10 @@ jobs:
           PIN_KERNELSU="3c1240625655978f319a98398031100b80e9da7c"
           PIN_RESUKISU="3c1882886dbbb54f4aae7ddf205f8ccde32c2a34"
           PIN_SUKISU_ULTRA="e2912817f4e1b194e582a06e0b5eacf6a3fb7083"
+          # NP03J production manager pin. Update only after compatibility audit.
+          PIN_SUKISU_MANAGER_TAG="v4.2.0"
+          PIN_SUKISU_MANAGER_APK="SukiSU_v4.2.0_40900-release.apk"
+          PIN_SUKISU_MANAGER_SHA256="4ca9810e6355fbff0bbe4bf5ce159808e64a40d85987a11894030cd990a6bdf3"
           declare -A PIN_SUSFS=(
             [susfs_commit_android12_5_10]="ec785f47d49f7b3871ca9356f450411020af7017"
             [susfs_commit_android13_5_10]="ed3d6d9c9a2652e1c70f153f5358701e996d646c"
@@ -433,23 +437,23 @@ jobs:
                   "$flavor" "$owner" "$repo" "$run_id" "$stock"
                 ;;
               sukisu-ultra)
-                owner="SukiSU-Ultra"; repo="SukiSU-Ultra"; wf="build-manager.yml"
-                stock=$(git ls-remote https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/main | awk '{print $1; exit}')
-                run_id=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?head_sha=${stock}" \
-                  --jq '.workflow_runs[0].id // empty')
-                if [[ -z "${run_id}" ]]; then
-                  echo "No manager build for stock ${stock}, falling back to latest successful run" >&2
-                  fb=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?branch=main&status=success&per_page=1")
-                  run_id=$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')
-                  stock=$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')
-                  if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
-                  if [[ -z "${run_id}" ]]; then
-                    echo "ERROR: no ${repo} manager build exists for stock commit ${stock}" >&2
+                owner="SukiSU-Ultra"; repo="SukiSU-Ultra"
+                if [ "${COMMIT_MODE:-${{ inputs.commit_mode || 'verified' }}" = "verified" ]; then
+                  manager_tag="${PIN_SUKISU_MANAGER_TAG}"
+                  manager_apk="${PIN_SUKISU_MANAGER_APK}"
+                  manager_sha="${PIN_SUKISU_MANAGER_SHA256}"
+                else
+                  rel=$(gh api "repos/${owner}/${repo}/releases/latest")
+                  manager_tag=$(echo "$rel" | jq -r '.tag_name')
+                  manager_apk=$(echo "$rel" | jq -r '.assets[] | select(.name | endswith("-release.apk")) | .name' | head -n1)
+                  manager_sha=$(echo "$rel" | jq -r --arg n "$manager_apk" '.assets[] | select(.name == $n) | (.digest // "")' | sed 's/^sha256://')
+                  if [ -z "$manager_tag" ] || [ -z "$manager_apk" ] || [ -z "$manager_sha" ]; then
+                    echo "ERROR: latest stable SukiSU release is missing tag/APK/digest metadata" >&2
                     exit 1
                   fi
                 fi
-                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"Manager,Spoofed-Manager"}' \
-                  "$flavor" "$owner" "$repo" "$run_id" "$stock"
+                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"release","run_id":0,"stock":"%s","tag":"%s","want":"%s","sha256":"%s"}' \
+                  "$flavor" "$owner" "$repo" "$manager_tag" "$manager_tag" "$manager_apk" "$manager_sha"
                 ;;
               kowsu)
                 owner="KOWX712"; repo="KernelSU"; wf="build-manager.yml"
@@ -572,17 +576,47 @@ jobs:
             SRC=$(echo "$M" | jq -r .source)
             RUN_ID=$(echo "$M" | jq -r .run_id)
             WANT=$(echo "$M" | jq -r '.want // ""')
+            TAG=$(echo "$M" | jq -r '.tag // ""')
+            EXPECTED_SHA256=$(echo "$M" | jq -r '.sha256 // ""')
             DLDIR="dl_${REPO}"
             mkdir -p "$DLDIR"
             (
               cd "$DLDIR"
               if [ "$SRC" = "release" ]; then
+                if [ -n "$TAG" ]; then
+                  RELEASE_API="https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${TAG}"
+                else
+                  RELEASE_API="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
+                fi
                 curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-                  -H "Authorization: Bearer ***" \
-                  "https://api.github.com/repos/${OWNER}/${REPO}/releases/latest" > rel.json
-                for URL in $(jq -r '.assets[] | select(.name | endswith(".apk")) | .browser_download_url' rel.json); do
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  "$RELEASE_API" > rel.json
+
+                if [ -n "$WANT" ]; then
+                  URLS=$(jq -r --arg want "$WANT" '
+                    ($want | split(",")) as $wl |
+                    .assets[] |
+                    select(.name | endswith(".apk")) |
+                    select(.name as $n | any($wl[]; . == $n)) |
+                    .browser_download_url' rel.json)
+                else
+                  URLS=$(jq -r '.assets[] | select(.name | endswith(".apk")) | .browser_download_url' rel.json)
+                fi
+
+                [ -n "$URLS" ] || { echo "ERROR: no requested APK found in release ${TAG:-latest}" >&2; exit 1; }
+
+                for URL in $URLS; do
                   NAME="${URL##*/}"
                   curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$NAME" "$URL"
+                  if [ -n "$EXPECTED_SHA256" ]; then
+                    ACTUAL_SHA256=$(sha256sum "$NAME" | awk '{print $1}')
+                    [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ] || {
+                      echo "ERROR: manager APK SHA256 mismatch for $NAME" >&2
+                      echo "Expected: $EXPECTED_SHA256" >&2
+                      echo "Actual:   $ACTUAL_SHA256" >&2
+                      exit 1
+                    }
+                  fi
                   cp -f "$NAME" "$OUT_APKS/$NAME"
                   echo "$OWNER|$REPO|$NAME" >> "$MANIFEST"
                 done
