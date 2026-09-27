@@ -1,0 +1,298 @@
+name: NP03J Final Nova Utility Full Build
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - np03j-final-nova-utility
+    paths:
+      - '.github/workflows/np03j-final-nova-utility.yml'
+      - '.github/workflows/prepare.yml'
+      - '.github/workflows/build.yml'
+      - '.github/actions/**'
+      - '.github/scripts/backport-sukisu-builtin-uapi4.py'
+
+env:
+  SUKISU_MANAGER_SOURCE: cf87e3f4ddd3f6e5464d85acf56aaa6950e70841
+  CUSTOM_APP_NAME: Nova Utility
+  CUSTOM_PACKAGE: app.nova.utility
+  MANAGER_GENERATION: "40939"
+  NOMOUNT_COMMIT: d0f57d5c37ff02aae2299daded57919153240cb3
+
+jobs:
+  build-custom-manager:
+    name: Build Nova Utility Manager 40939
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      expected_size2: ${{ steps.cert.outputs.expected_size2 }}
+      expected_hash2: ${{ steps.cert.outputs.expected_hash2 }}
+      apk_sha256: ${{ steps.verify.outputs.apk_sha256 }}
+    steps:
+      - name: Checkout exact SukiSU source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/SukiSU-Ultra/SukiSU-Ultra.git SukiSU-Ultra
+          git -C SukiSU-Ultra checkout --detach "$SUKISU_MANAGER_SOURCE"
+          ACTUAL="$(git -C SukiSU-Ultra rev-parse HEAD)"
+          [ "$ACTUAL" = "$SUKISU_MANAGER_SOURCE" ]
+          COUNT="$(git -C SukiSU-Ultra rev-list --count HEAD)"
+          GENERATION=$((40000 + COUNT - 2815))
+          [ "$GENERATION" = "$MANAGER_GENERATION" ] || {
+            echo "::error::Manager generation mismatch: expected $MANAGER_GENERATION got $GENERATION"
+            exit 1
+          }
+          echo "PASS source=$ACTUAL generation=$GENERATION"
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r29
+
+      - name: Setup Rust targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android armv7-linux-androideabi
+
+      - name: Generate final Manager signing identity
+        id: cert
+        working-directory: SukiSU-Ultra
+        shell: bash
+        run: |
+          set -euo pipefail
+          STORE_PASS="$(openssl rand -hex 32)"
+          KEY_PASS="$(openssl rand -hex 32)"
+          echo "::add-mask::$STORE_PASS"
+          echo "::add-mask::$KEY_PASS"
+
+          keytool -genkeypair \
+            -alias nova-utility \
+            -keyalg RSA \
+            -keysize 3072 \
+            -validity 3650 \
+            -storepass "$STORE_PASS" \
+            -keypass "$KEY_PASS" \
+            -dname "CN=Nova Utility, OU=NP03J, O=Nova Utility" \
+            -storetype JKS \
+            -keystore nova-utility.jks
+
+          keytool -exportcert \
+            -alias nova-utility \
+            -keystore nova-utility.jks \
+            -storepass "$STORE_PASS" \
+            -file nova-utility-cert.der
+
+          SIZE_DEC="$(stat -c%s nova-utility-cert.der)"
+          SIZE_HEX="$(printf '0x%x' "$SIZE_DEC")"
+          HASH="$(sha256sum nova-utility-cert.der | awk '{print $1}')"
+          [[ "$SIZE_HEX" =~ ^0x[0-9a-f]+$ ]]
+          [[ "$HASH" =~ ^[0-9a-f]{64}$ ]]
+
+          echo "expected_size2=$SIZE_HEX" >> "$GITHUB_OUTPUT"
+          echo "expected_hash2=$HASH" >> "$GITHUB_OUTPUT"
+          echo "STORE_PASS=$STORE_PASS" >> "$GITHUB_ENV"
+          echo "KEY_PASS=$KEY_PASS" >> "$GITHUB_ENV"
+          echo "PASS cert_size=$SIZE_HEX"
+          echo "PASS cert_sha256=$HASH"
+
+      - name: Build package-bound ksud
+        working-directory: SukiSU-Ultra
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          KSU_PACKAGE_NAME: app.nova.utility
+        run: |
+          set -euo pipefail
+          for TARGET in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            (
+              source .github/scripts/setup-rust-build.sh "$TARGET" 26
+              cargo build --target "$TRIPLE" --release --manifest-path ./userspace/ksud/Cargo.toml
+            )
+            test -x "target/$TARGET/release/ksud"
+            strings "target/$TARGET/release/ksud" | grep -F "$KSU_PACKAGE_NAME" >/dev/null || {
+              echo "::error::ksud $TARGET lacks custom package binding"
+              exit 1
+            }
+          done
+          echo "PASS ksud package binding=$KSU_PACKAGE_NAME"
+
+      - name: Deterministically spoof Manager namespaces
+        working-directory: SukiSU-Ultra/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -depth -type d -name 'com' -execdir mv {} app \;
+          find . -depth -type d -name 'sukisu' -execdir mv {} nova \;
+          find . -depth -type d -name 'ultra' -execdir mv {} utility \;
+          find . -depth -type d -name 'io' -execdir mv {} dev \;
+
+          find . -type f -exec sed -i \
+            -e 's/com\.sukisu\.ultra/app.nova.utility/g' \
+            -e 's/io\.sukisu\.ultra/dev.nova.utility/g' \
+            -e 's/com\.sukisu\.zako/app.nova.zako/g' \
+            -e 's/com\/sukisu\/ultra/app\/nova\/utility/g' \
+            -e 's/io\/sukisu\/ultra/dev\/nova\/utility/g' \
+            -e 's/io_sukisu_ultra/dev_nova_utility/g' \
+            -e 's/com_sukisu_ultra/app_nova_utility/g' \
+            {} +
+
+          if grep -R -n -E 'com\.sukisu\.ultra|io\.sukisu\.ultra|com/sukisu/ultra|io/sukisu/ultra|com_sukisu_ultra|io_sukisu_ultra' app/src app/build.gradle.kts; then
+            echo "::error::original Manager namespace residue remains"
+            exit 1
+          fi
+          grep -q 'namespace = "app.nova.utility"' app/build.gradle.kts
+          echo "PASS deterministic spoof"
+
+      - name: Install ksud and signing config
+        working-directory: SukiSU-Ultra
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p manager/app/src/main/jniLibs/arm64-v8a manager/app/src/main/jniLibs/armeabi-v7a manager/app/src/main/jniLibs/x86_64
+          install -m 0755 target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
+          install -m 0755 target/armv7-linux-androideabi/release/ksud manager/app/src/main/jniLibs/armeabi-v7a/libksud.so
+          install -m 0755 target/x86_64-linux-android/release/ksud manager/app/src/main/jniLibs/x86_64/libksud.so
+          cp nova-utility.jks manager/nova-utility.jks
+          {
+            echo "KEYSTORE_PASSWORD=$STORE_PASS"
+            echo "KEY_ALIAS=nova-utility"
+            echo "KEY_PASSWORD=$KEY_PASS"
+            echo "KEYSTORE_FILE=nova-utility.jks"
+          } >> manager/gradle.properties
+
+      - name: Build Nova Utility APK
+        working-directory: SukiSU-Ultra/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME="$CUSTOM_PACKAGE" -PKSU_NAME="$CUSTOM_APP_NAME"
+
+      - name: Verify final Manager
+        id: verify
+        working-directory: SukiSU-Ultra
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC_APK="$(find manager/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n1)"
+          test -n "$SRC_APK"
+          mkdir -p "$GITHUB_WORKSPACE/final-manager"
+          APK="$GITHUB_WORKSPACE/final-manager/Nova-Utility-v4.2.0-40939-spoofed.apk"
+          cp "$SRC_APK" "$APK"
+          cp nova-utility-cert.der "$GITHUB_WORKSPACE/final-manager/Nova-Utility-40939-cert.der"
+
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$AAPT2"
+          test -x "$APKSIGNER"
+
+          BADGING="$("$AAPT2" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | grep -F "package: name='app.nova.utility'" >/dev/null
+          printf '%s\n' "$BADGING" | grep -F "versionCode='40939'" >/dev/null
+          printf '%s\n' "$BADGING" | grep -F "application-label:'Nova Utility'" >/dev/null
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK" > "$GITHUB_WORKSPACE/final-manager/apksigner.txt"
+          CERT_SHA="$(grep -m1 'certificate SHA-256 digest:' "$GITHUB_WORKSPACE/final-manager/apksigner.txt" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]')"
+          EXPECTED_CERT_SHA="${{ steps.cert.outputs.expected_hash2 }}"
+          [ "$CERT_SHA" = "$EXPECTED_CERT_SHA" ]
+
+          APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          echo "apk_sha256=$APK_SHA" >> "$GITHUB_OUTPUT"
+
+          cat > "$GITHUB_WORKSPACE/final-manager/Nova-Utility-ManagerInfo.txt" <<EOF
+          app_name=Nova Utility
+          package=app.nova.utility
+          version_name=v4.2.0
+          version_code=40939
+          uapi=4
+          source_commit=$SUKISU_MANAGER_SOURCE
+          certificate_size=${{ steps.cert.outputs.expected_size2 }}
+          certificate_sha256=${{ steps.cert.outputs.expected_hash2 }}
+          apk_sha256=$APK_SHA
+          ksud_package_binding=app.nova.utility
+          deterministic_spoof=true
+          EOF
+
+          echo "PASS package=app.nova.utility"
+          echo "PASS app_name=Nova Utility"
+          echo "PASS versionCode=40939"
+          echo "PASS cert=$CERT_SHA"
+          echo "PASS apk_sha256=$APK_SHA"
+
+      - name: Upload Nova Utility Manager
+        uses: actions/upload-artifact@v7
+        with:
+          name: Nova-Utility-Manager-40939
+          path: final-manager/**
+          if-no-files-found: error
+          compression-level: 9
+
+  build-nomount-module:
+    name: Build pinned NoMount metamodule
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build NoMount
+        id: buildmod
+        uses: ./.github/actions/nomount-metamodule
+        with:
+          commit: d0f57d5c37ff02aae2299daded57919153240cb3
+      - name: Verify NoMount provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODULE_DIR="${{ steps.buildmod.outputs.module_dir }}"
+          EXPECTED="$NOMOUNT_COMMIT"
+          ACTUAL="$(tr -d '\r\n' < "$MODULE_DIR/NOMOUNT_SOURCE_COMMIT")"
+          [ "$ACTUAL" = "$EXPECTED" ]
+          test -x "$MODULE_DIR/bin/nm-arm64"
+          test -x "$MODULE_DIR/bin/nm-arm"
+          echo "PASS NoMount=$ACTUAL"
+      - name: Upload NoMount metamodule
+        uses: actions/upload-artifact@v7
+        with:
+          name: NoMount-Metamodule
+          path: ${{ steps.buildmod.outputs.module_dir }}
+          if-no-files-found: error
+          compression-level: 0
+
+  build-final-kernel:
+    name: Build final full-feature NP03J kernel
+    needs:
+      - build-custom-manager
+      - build-nomount-module
+    uses: ./.github/workflows/prepare.yml
+    with:
+      config_file: .github/config/android14-6.1.json
+      feature_set: SUSFS+NoMount+BBG+NET+DS+NTSync+Ptrace+Unicode+BPF
+      susfs_commit: 4fc9c1898ea66f51847cdbc0d1473ea4ef525a70
+      root_flavor: sukisu-ultra
+      root_commit: b20dee702035af09cb2ecb5f35443bbc1747f3e6
+      nomount_commit: d0f57d5c37ff02aae2299daded57919153240cb3
+      kernel_patches_commit: 41ae18b35d20e0c6ac04116785a4a1089528ae94
+      anykernel3_commit: e1e9dce98430c5c6f231f7094a8c7f4ecaf50948
+      droidspaces_commit: cff50fa04d50472b607ba6822e8bf482b19cd427
+      brand_name: Wild
+      bypass: false
+      use_cache: false
+      os_patch_level: lts
+      variant: SukiSU-FINAL-NovaUtility-FullFeatures
+      custom_manager_expected_size2: ${{ needs.build-custom-manager.outputs.expected_size2 }}
+      custom_manager_expected_hash2: ${{ needs.build-custom-manager.outputs.expected_hash2 }}
+    secrets: inherit
