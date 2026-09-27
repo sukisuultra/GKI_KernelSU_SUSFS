@@ -457,9 +457,9 @@ jobs:
                   MIRROR_REPO="${GITHUB_REPOSITORY}"
                   MIRROR_OWNER="${MIRROR_REPO%%/*}"
                   MIRROR_NAME="${MIRROR_REPO#*/}"
-                  if gh api "repos/${MIRROR_REPO}/releases/tags/${MIRROR_TAG}" \
-                       --jq --arg n "$PIN_SUKISU_MANAGER_APK" '.assets[] | select(.name == $n) | .name' \
-                       2>/dev/null | grep -qx "$PIN_SUKISU_MANAGER_APK"; then
+                  if gh api "repos/${MIRROR_REPO}/releases/tags/${MIRROR_TAG}" 2>/dev/null \
+                       | jq -r --arg n "$PIN_SUKISU_MANAGER_APK" '.assets[] | select(.name == $n) | .name' \
+                       | grep -qx "$PIN_SUKISU_MANAGER_APK"; then
                     printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"release","run_id":0,"stock":"%s","tag":"%s","want":"%s","sha256":"%s"}' \
                       "$flavor" "$MIRROR_OWNER" "$MIRROR_NAME" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
                       "$MIRROR_TAG" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
