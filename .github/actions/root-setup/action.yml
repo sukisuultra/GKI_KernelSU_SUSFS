@@ -113,6 +113,24 @@ runs:
         config_list: |
           CONFIG_KSU=y
 
+    - name: Enable KPM for SukiSU-Ultra
+      if: inputs.flavor == 'sukisu-ultra'
+      shell: bash
+      run: |
+        set -euo pipefail
+        KCONFIG="${{ github.workspace }}/kernel/SukiSU-Ultra/kernel/Kconfig"
+        grep -Eq '^[[:space:]]*config[[:space:]]+KPM([[:space:]]|$)' "$KCONFIG" || {
+          echo "ERROR: selected SukiSU source does not expose CONFIG_KPM." >&2
+          exit 1
+        }
+
+    - name: Set KPM kernel config
+      if: inputs.flavor == 'sukisu-ultra'
+      uses: ./.github/actions/set-kernel-config
+      with:
+        config_list: |
+          CONFIG_KPM=y
+
     - name: Disable multi-manager for ReSukiSU
       if: inputs.flavor == 'resukisu'
       uses: ./.github/actions/set-kernel-config
