@@ -450,12 +450,24 @@ jobs:
               sukisu-ultra)
                 owner="SukiSU-Ultra"; repo="SukiSU-Ultra"
                 if [ "${{ inputs.commit_mode || 'verified' }}" = "verified" ]; then
-                  # Exact official 40939 Manager from upstream Build Manager run.
-                  # Do not rebuild or re-sign: the current NP03J kernel binding
-                  # trusts the upstream production certificate.
-                  printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"%s","apk":"%s","sha256":"%s"}' \
-                    "$flavor" "$owner" "$repo" "$PIN_SUKISU_MANAGER_RUN_ID" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
-                    "$PIN_SUKISU_MANAGER_ARTIFACT" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
+                  # Prefer our permanent byte-for-byte mirror after it exists.
+                  # Until the first mirror job runs, fall back to the exact
+                  # official upstream artifact. Both paths are SHA256-gated.
+                  MIRROR_TAG="np03j-sukisu-manager-40939"
+                  MIRROR_REPO="${GITHUB_REPOSITORY}"
+                  MIRROR_OWNER="${MIRROR_REPO%%/*}"
+                  MIRROR_NAME="${MIRROR_REPO#*/}"
+                  if gh api "repos/${MIRROR_REPO}/releases/tags/${MIRROR_TAG}" \
+                       --jq --arg n "$PIN_SUKISU_MANAGER_APK" '.assets[] | select(.name == $n) | .name' \
+                       2>/dev/null | grep -qx "$PIN_SUKISU_MANAGER_APK"; then
+                    printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"release","run_id":0,"stock":"%s","tag":"%s","want":"%s","sha256":"%s"}' \
+                      "$flavor" "$MIRROR_OWNER" "$MIRROR_NAME" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
+                      "$MIRROR_TAG" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
+                  else
+                    printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"%s","apk":"%s","sha256":"%s"}' \
+                      "$flavor" "$owner" "$repo" "$PIN_SUKISU_MANAGER_RUN_ID" "$PIN_SUKISU_MANAGER_SOURCE_COMMIT" \
+                      "$PIN_SUKISU_MANAGER_ARTIFACT" "$PIN_SUKISU_MANAGER_APK" "$PIN_SUKISU_MANAGER_SHA256"
+                  fi
                 else
                   rel=$(gh api "repos/${owner}/${repo}/releases/latest")
                   manager_tag=$(echo "$rel" | jq -r '.tag_name')
