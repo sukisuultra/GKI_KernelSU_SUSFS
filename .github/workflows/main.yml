@@ -18,7 +18,7 @@ on:
       use_cache:
         description: "Use ccache/bazel cache (restore/save)"
         type: boolean
-        default: true
+        default: false
       bypass:
         description: "Apply kernel version-check bypass hack"
         type: boolean
@@ -35,12 +35,12 @@ on:
           - 6.1.x-android14
           - 6.6.x-android15
           - 6.12.x-android16
-        default: All
+        default: 6.1.x-android14
       os_patch_level:
         description: "Patch date (YYYY-MM), kernel sublevel, lts, or All (no filter)"
         required: true
         type: string
-        default: All
+        default: lts
       brand_name:
         description: "Kernel Branding"
         type: string
@@ -65,7 +65,7 @@ on:
           - KowSU
           - No Root
           - All
-        default: All
+        default: SukiSU-Ultra
       use_susfs:
         description: "SUSFS"
         type: boolean
@@ -73,35 +73,35 @@ on:
       use_nomount:
         description: "NoMount"
         type: boolean
-        default: true
+        default: false
       use_bbg:
         description: "Baseband Guard"
         type: boolean
-        default: true
+        default: false
       use_net:
         description: "Networking"
         type: boolean
-        default: true
+        default: false
       use_ds:
         description: "DroidSpaces"
         type: boolean
-        default: true
+        default: false
       use_ntsync:
         description: "NTSync"
         type: boolean
-        default: true
+        default: false
       use_ptrace:
         description: "Ptrace Patch"
         type: boolean
-        default: true
+        default: false
       use_unicode:
         description: "Unicode Fix"
         type: boolean
-        default: true
+        default: false
       use_bpf:
         description: "BPF Stack (BTF + eBPF + FUSE-BPF)"
         type: boolean
-        default: true
+        default: false
       use_perf:
         description: "Performance"
         type: boolean
