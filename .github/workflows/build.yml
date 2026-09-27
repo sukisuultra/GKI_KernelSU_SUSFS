@@ -72,6 +72,16 @@ on:
         required: false
         type: boolean
         default: true
+      custom_manager_cert_size:
+        description: "Optional trusted custom SukiSU Manager certificate DER size (hex)"
+        required: false
+        type: string
+        default: ""
+      custom_manager_cert_hash:
+        description: "Optional trusted custom SukiSU Manager certificate SHA256"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build-gki:
@@ -183,6 +193,30 @@ jobs:
       with:
         flavor: ${{ inputs.root_flavor }}
         commit: ${{ inputs.root_commit }}
+
+    - name: Add trusted Nova Utility Manager certificate
+      if: inputs.root_flavor == 'sukisu-ultra' && inputs.custom_manager_cert_size != '' && inputs.custom_manager_cert_hash != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        SIZE="${{ inputs.custom_manager_cert_size }}"
+        HASH="${{ inputs.custom_manager_cert_hash }}"
+        [[ "$SIZE" =~ ^0x[0-9a-fA-F]+$ ]] || {
+          echo "::error::Invalid custom manager certificate size: $SIZE"
+          exit 1
+        }
+        [[ "$HASH" =~ ^[0-9a-fA-F]{64}$ ]] || {
+          echo "::error::Invalid custom manager certificate SHA256"
+          exit 1
+        }
+        python3 "${{ github.workspace }}/.github/scripts/add-sukisu-manager-cert.py"           "${{ github.workspace }}/kernel/SukiSU-Ultra"           --size "$SIZE"           --sha256 "$HASH"           --label "Nova Utility"
+        grep -q "$HASH" "${{ github.workspace }}/kernel/SukiSU-Ultra/kernel/manager/apk_sign.c" || {
+          echo "::error::Custom manager certificate was not injected"
+          exit 1
+        }
+        echo "CUSTOM_MANAGER_CERT_SIZE=$SIZE" >> "$GITHUB_ENV"
+        echo "CUSTOM_MANAGER_CERT_HASH=$HASH" >> "$GITHUB_ENV"
+        echo "PASS: Nova Utility manager certificate trusted by kernel"
 
     - name: Mark No Root build metadata
       if: inputs.root_flavor == 'none'
@@ -319,6 +353,13 @@ jobs:
           echo "::error::UAPI3 file-wrapper credential fix missing"
           exit 1
         }
+        if [ -n "${{ inputs.custom_manager_cert_hash }}" ]; then
+          grep -q "${{ inputs.custom_manager_cert_hash }}" "$SUKI_DIR/kernel/manager/apk_sign.c" || {
+            echo "::error::Nova Utility manager certificate trust entry missing"
+            exit 1
+          }
+          echo "PASS: custom Nova Utility manager certificate trust entry present"
+        fi
         grep -Eq '^KSU_VERSION[[:space:]]*:=[[:space:]]*40939$' "$SUKI_DIR/kernel/Makefile" || {
           echo "::error::SukiSU kernel generation is not frozen to official Manager 40939"
           exit 1
