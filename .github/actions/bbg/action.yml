@@ -4,12 +4,24 @@ description: Download and configure Baseband Guard security module
 runs:
   using: composite
   steps:
-    - name: Install Baseband Guard
+    - name: Install pinned Baseband Guard
       uses: ./.github/actions/retry
       with:
         command: |
-          set -o pipefail
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/main/setup.sh | bash
+          set -euo pipefail
+          BBG_COMMIT="a54e0dc6cf0aff4dd87fec49644a02d2eb612905"
+          SETUP_URL="https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/${BBG_COMMIT}/setup.sh"
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 "$SETUP_URL" -o /tmp/baseband-guard-setup.sh
+          sh /tmp/baseband-guard-setup.sh
+          git -C Baseband-guard fetch --depth=1 origin "$BBG_COMMIT"
+          git -C Baseband-guard checkout --detach "$BBG_COMMIT"
+          ACTUAL="$(git -C Baseband-guard rev-parse HEAD)"
+          [ "$ACTUAL" = "$BBG_COMMIT" ] || {
+            echo "ERROR: Baseband Guard pin mismatch: expected $BBG_COMMIT got $ACTUAL" >&2
+            exit 1
+          }
+          echo "BBG_COMMIT=$BBG_COMMIT" >> "$GITHUB_ENV"
+          echo "PASS: Baseband Guard pinned at $BBG_COMMIT"
         attempts: 5
         delay: 5
         workdir: ${{ github.workspace }}/kernel
