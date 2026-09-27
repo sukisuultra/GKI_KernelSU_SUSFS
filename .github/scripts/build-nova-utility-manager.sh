@@ -158,7 +158,7 @@ test -x "$APKSIGNER"
 head -n 8 /tmp/nova-badging.txt
 grep -q "package: name='app.nova.utility'" /tmp/nova-badging.txt
 grep -q "versionCode='40939'" /tmp/nova-badging.txt
-grep -q "versionName='v4.2.0-spoofed'" /tmp/nova-badging.txt
+grep -q "versionName='v4.2.0'" /tmp/nova-badging.txt
 grep -q "application-label:'Nova Utility'" /tmp/nova-badging.txt
 
 "$APKSIGNER" verify --verbose --print-certs "$APK" > /tmp/nova-signature.txt
@@ -182,7 +182,8 @@ echo "apk_name=$(basename "$APK")" >> "$GITHUB_OUTPUT"
 cat > dist/Nova_Utility_Manager_40939_BUILD_INFO.txt <<EOF
 app_name=Nova Utility
 package=app.nova.utility
-version_name=v4.2.0-spoofed
+version_name=v4.2.0
+spoofed=true
 version_code=40939
 manager_source=$SUKISU_MANAGER_SOURCE
 kernel_generation=40939
@@ -202,6 +203,6 @@ unset STOREPASS KEYPASS
 
 echo "PASS: package=app.nova.utility"
 echo "PASS: app name=Nova Utility"
-echo "PASS: version=40939 / v4.2.0-spoofed"
+echo "PASS: version=40939 / v4.2.0; deterministic spoof=true"
 echo "PASS: signature=v2 only"
 echo "PASS: apk sha256=$APK_SHA"
