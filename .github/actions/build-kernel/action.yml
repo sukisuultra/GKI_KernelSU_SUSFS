@@ -134,13 +134,13 @@ runs:
 
       {
         echo "### SukiSU KPM KernelPatch"
-        echo "- Version: `$KPM_VERSION`"
-        echo "- Commit: `$TAG_SHA`"
-        echo "- patch_linux SHA256: `$ACTUAL_PATCH_SHA256`"
-        echo "- Image SHA256 before: `$BEFORE_SHA256`"
-        echo "- Image SHA256 after: `$AFTER_SHA256`"
-        echo "- Image size before: `$BEFORE_SIZE`"
-        echo "- Image size after: `$AFTER_SIZE`"
+        echo "- Version: $KPM_VERSION"
+        echo "- Commit: $TAG_SHA"
+        echo "- patch_linux SHA256: $ACTUAL_PATCH_SHA256"
+        echo "- Image SHA256 before: $BEFORE_SHA256"
+        echo "- Image SHA256 after: $AFTER_SHA256"
+        echo "- Image size before: $BEFORE_SIZE"
+        echo "- Image size after: $AFTER_SIZE"
       } >> "$GITHUB_STEP_SUMMARY"
 
   - name: 'Gather Build Artifacts'
